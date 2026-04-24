@@ -14,11 +14,11 @@ from scipy import stats
 
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Sugar Price Risk Model",
+   <center> page_title="Sugar Price Risk Model",
     page_icon="🍬",
     layout="wide",
     initial_sidebar_state="expanded",
-    align="center",
+   </center>,
 )
 
 # ── Custom CSS ─────────────────────────────────────────────────────────────────
