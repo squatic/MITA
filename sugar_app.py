@@ -126,7 +126,7 @@ st.markdown("""
     letter-spacing: 0.04em;
     width: 100%;
   }
-  .stButton > button:hover { background: #4A4747; color: #0f1923 !important; }
+  .stButton > button:hover { background: #F7DC6F; color: #0f1923 !important; }
   section[data-testid="stSidebar"] .stButton > button { color: #4A4747 !important; }
   section[data-testid="stSidebar"] .stButton > button p { color: #4A4747 !important; }
   section[data-testid="stSidebar"] .stButton > button:hover { color: #4A4747 !important; }
