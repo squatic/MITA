@@ -340,9 +340,9 @@ with st.sidebar:
                 )
                 if "GBM" in model:
                     st.markdown(
-                        f'<div style="font-size:12px;color:#000000;font-family:\'IBM Plex Mono\',monospace;line-height:1.8">'
-                        f'μ (Itô) = <b style="color:#000000">{gbm_est["mu_ito"]*100:.2f}%</b><br>'
-                        f'σ annual = <b style="color:#000000">{gbm_est["sigma_annual"]*100:.2f}%</b>'
+                        f'<div style="font-size:12px;color:#c9bfac;font-family:\'IBM Plex Mono\',monospace;line-height:1.8">'
+                        f'μ (Itô) = <b style="color:#d4a843">{gbm_est["mu_ito"]*100:.2f}%</b><br>'
+                        f'σ annual = <b style="color:#4a9fb5">{gbm_est["sigma_annual"]*100:.2f}%</b>'
                         f'</div>', unsafe_allow_html=True
                     )
                     apply_label = "✅ Apply GBM Parameters"
@@ -369,6 +369,7 @@ with st.sidebar:
                     apply_label = "✅ Apply OU Parameters"
 
                 st.markdown("")
+                st.background(#000000)
                 if st.button(apply_label, use_container_width=True):
                     if "GBM" in model:
                         st.session_state["param_mu"]    = float(round(gbm_est["mu_ito"], 4))
