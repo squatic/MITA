@@ -369,7 +369,6 @@ with st.sidebar:
                     apply_label = "✅ Apply OU Parameters"
 
                 st.markdown("")
-                st.background(#000000)
                 if st.button(apply_label, use_container_width=True):
                     if "GBM" in model:
                         st.session_state["param_mu"]    = float(round(gbm_est["mu_ito"], 4))
