@@ -311,6 +311,7 @@ for _k, _v in _defaults.items():
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("##  🍬 Sugar Price\nMonte Carlo Risk Model")
+    "📄 [**Readme File**](https://github.com/squatic/MITA/blob/main/README.md) &nbsp;·&nbsp; "
     st.markdown("---")
 
     # ── Model Setup ──────────────────────────────────────────────────────────
@@ -1142,7 +1143,6 @@ with tab_weekly:
 # ── Footer ─────────────────────────────────────────────────────────────────────
 st.markdown("---")
 st.caption(
-    "📄 [**Readme File**](https://github.com/squatic/MITA/blob/main/README.md) &nbsp;·&nbsp; "
     "Mill-gate raw sugar price model. "
     "GBM assumes lognormally distributed returns. "
     "Mean-Reverting uses an Ornstein–Uhlenbeck process on log-prices. "
