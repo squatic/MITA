@@ -1141,8 +1141,6 @@ with tab_weekly:
 
 # ── Footer ─────────────────────────────────────────────────────────────────────
 st.markdown("---")
-with open("index.html", "w") as file:
-    file.write('<a href="https://www.example.com">Visit Example</a>')
 st.caption(
     "Mill-gate raw sugar price model. "
     "GBM assumes lognormally distributed returns. "
