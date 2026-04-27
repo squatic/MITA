@@ -513,7 +513,7 @@ with st.sidebar:
 
 
 # ── Title ──────────────────────────────────────────────────────────────────────
-st.title("LSC Sugar Price Monte Carlo Risk Model")
+st.title("Sugar Price Monte Carlo Risk Model")
 col_model, col_spot, col_horizon = st.columns(3)
 with col_model:
     st.markdown(f'<span class="info-pill">Model: {model}</span>', unsafe_allow_html=True)
