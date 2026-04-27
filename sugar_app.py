@@ -1142,6 +1142,7 @@ with tab_weekly:
 # ── Footer ─────────────────────────────────────────────────────────────────────
 st.markdown("---")
 st.caption(
+    "📄 [**Readme File**](https://github.com/squatic/MITA/blob/main/README.md) &nbsp;·&nbsp; "
     "Mill-gate raw sugar price model. "
     "GBM assumes lognormally distributed returns. "
     "Mean-Reverting uses an Ornstein–Uhlenbeck process on log-prices. "
