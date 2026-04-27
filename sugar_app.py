@@ -136,32 +136,6 @@ st.markdown("""
     border: 1px solid #52c87a !important;
   }
   .apply-btn > button:hover { background: #255c37 !important; }
-
-  /* Comments section */
-  .comment-box {
-    background: #0f1923;
-    border: 1px solid #1e2d3d;
-    border-radius: 10px;
-    padding: 1rem 1.2rem;
-    margin-bottom: 0.75rem;
-    font-size: 0.88rem;
-    color: #c9bfac;
-  }
-  .comment-author {
-    font-weight: 600;
-    color: #4a9fb5;
-    font-size: 0.82rem;
-    letter-spacing: 0.04em;
-  }
-  .comment-time {
-    color: #4b5563;
-    font-size: 0.75rem;
-    margin-left: 8px;
-  }
-  .comment-text {
-    margin-top: 0.4rem;
-    line-height: 1.6;
-  }
 </style>
 """, unsafe_allow_html=True)
 
@@ -327,27 +301,16 @@ _defaults = {
     "param_kappa": 0.60,
     "param_theta": 2400.0,
     "params_applied": False,
-    "applied_from": None,
+    "applied_from": None,   # "GBM" or "OU" — tracks which estimation was applied
 }
 for _k, _v in _defaults.items():
     if _k not in st.session_state:
         st.session_state[_k] = _v
 
-# ── Comments Session State ─────────────────────────────────────────────────────
-if "comments" not in st.session_state:
-    st.session_state["comments"] = []
-
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("##  🍬 Sugar Price\nMonte Carlo Risk Model")
-
-    # ── README link ───────────────────────────────────────────────────────────
-    st.markdown(
-        "📄 [**Readme File**](https://github.com/squatic/MITA/blob/main/README.md)",
-        unsafe_allow_html=False,
-    )
-
     st.markdown("---")
 
     # ── Model Setup ──────────────────────────────────────────────────────────
@@ -417,6 +380,7 @@ with st.sidebar:
                 gbm_est = compute_gbm_params(_prices, est_freq)
                 ou_est  = compute_ou_params(_prices, est_freq)
 
+                # Compact preview of estimated values
                 st.markdown(
                     '<div style="font-size:11px;color:#000000;font-family:\'IBM Plex Mono\',monospace;margin:8px 0 4px 0">'
                     'ESTIMATED PARAMS</div>', unsafe_allow_html=True
@@ -493,6 +457,7 @@ with st.sidebar:
             step=0.001, format="%.4f",
             help="Annualised standard deviation of log returns."
         )
+        # Persist manual edits back to session state
         st.session_state["param_mu"]    = mu
         st.session_state["param_sigma"] = sigma
     else:
@@ -544,7 +509,7 @@ with st.sidebar:
         help="Error bars around the weekly bar."
     )
 
-    run = st.button("▶  Run Simulation", use_container_width=True)
+    run   = st.button("▶  Run Simulation", use_container_width=True)
 
 
 # ── Title ──────────────────────────────────────────────────────────────────────
@@ -568,11 +533,10 @@ RED_CLR  = "#e05252"
 GREEN_OK = "#52c87a"
 AMBER    = "#f59e0b"
 
-tab_est, tab_sim, tab_weekly, tab_comments = st.tabs([
+tab_est, tab_sim, tab_weekly = st.tabs([
     "📊 Parameter Estimator",
     "🎲 Monte Carlo Simulation",
     "📅 Weekly Price Prediction",
-    "💬 Comments",
 ])
 
 
@@ -595,6 +559,7 @@ with tab_est:
     else:
         prices_est = df_raw[price_col].dropna().values
 
+        # Guard: need enough data
         if len(prices_est) < 10:
             st.error("Need at least 10 data points.")
             st.stop()
@@ -607,6 +572,7 @@ with tab_est:
                 f"For {est_freq.lower()} data, at least {min_rec} rows are recommended for reliable estimates."
             )
 
+        # Date index
         if date_col and date_col != "None":
             try:
                 dates_est = pd.to_datetime(df_raw[date_col].dropna().values[:len(prices_est)])
@@ -620,6 +586,7 @@ with tab_est:
         N_ann = annualization_factor(est_freq)
         dt    = dt_value(est_freq)
 
+        # ── Price History ──────────────────────────────────────────────────
         st.markdown('<div class="est-section-header">📊 Price History</div>', unsafe_allow_html=True)
         col_prev, col_chart = st.columns([1, 2])
 
@@ -642,6 +609,7 @@ with tab_est:
             st.pyplot(fig_px)
             plt.close()
 
+        # ── GBM Results ────────────────────────────────────────────────────
         st.markdown('<div class="est-section-header">📈 GBM Parameters</div>', unsafe_allow_html=True)
 
         g1, g2, g3, g4 = st.columns(4)
@@ -677,6 +645,7 @@ with tab_est:
         st.pyplot(fig_lr)
         plt.close()
 
+        # ── OU Results ──────────────────────────────────────────────────────
         st.markdown('<div class="est-section-header">🔄 Ornstein-Uhlenbeck Parameters</div>', unsafe_allow_html=True)
 
         if ou["k"] <= 0:
@@ -734,6 +703,7 @@ with tab_est:
         st.pyplot(fig_reg)
         plt.close()
 
+        # ── Summary Table + Apply ───────────────────────────────────────────
         st.markdown('<div class="est-section-header">📋 Summary — Values to Use in Your Simulation</div>', unsafe_allow_html=True)
 
         N_ann_est = annualization_factor(est_freq)
@@ -813,6 +783,7 @@ with tab_sim:
     prob_be  = float(np.mean(terminal <= breakeven))
     rev_risk = var95 * volume if volume > 0 else None
 
+    # ── KPI row ───────────────────────────────────────────────────────────────
     st.markdown('<div class="section-header">Key Statistics at Horizon</div>', unsafe_allow_html=True)
     k1, k2, k3, k4, k5 = st.columns(5)
     k1.metric("Mean Price",              f"₱{mean_p:,.0f}",  f"{(mean_p/S0-1)*100:+.1f}% vs spot")
@@ -832,9 +803,11 @@ with tab_sim:
     if rev_risk is not None:
         st.markdown(f'<div class="alert-danger" style="margin-top:6px">Revenue at Risk (VaR × Volume): <b>₱{rev_risk:,.0f}</b></div>', unsafe_allow_html=True)
 
+    # ── Charts ────────────────────────────────────────────────────────────────
     st.markdown('<div class="section-header">Price Distribution at Horizon</div>', unsafe_allow_html=True)
     tab_dist, tab_paths, tab_pct = st.tabs(["📊 Distribution", "📈 Price Paths", "🔢 Percentile Table"])
 
+    # Distribution
     with tab_dist:
         fig = go.Figure()
         fig.add_trace(go.Histogram(x=terminal, nbinsx=80, name="Simulated prices",
@@ -870,6 +843,7 @@ with tab_sim:
         c4.metric("P95 (best 5%)",   f"₱{p95:,.0f}",  f"{(p95/S0-1)*100:+.1f}% vs spot")
         st.caption(f"Expected Shortfall (avg price when ≤ P05): **₱{es95:,.0f}/Lkg**  —  Based on {N_sim:,} simulations.")
 
+    # Paths
     with tab_paths:
         if horizon_unit == "Weeks":
             times_display = times * 52
@@ -911,6 +885,7 @@ with tab_sim:
         st.plotly_chart(fig2, use_container_width=True)
         st.caption(f"Showing {display_k} sample paths with P05–P95 and P25–P75 confidence bands.")
 
+    # Percentile table
     with tab_pct:
         pcts = [1, 5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 75, 80, 85, 90, 95, 99]
         vals = np.percentile(terminal, pcts)
@@ -944,6 +919,7 @@ with tab_weekly:
         else:
             wdf = run_weekly_ou(S0, kappa, theta, sigma, n_weeks_int, N_sim_int, seed + 99)
 
+    # ── Determine bar centre & interval ──────────────────────────────────────
     bar_col   = "median" if weekly_display == "Median (P50)" else "mean"
     bar_label = "Median" if weekly_display == "Median (P50)" else "Mean"
     if weekly_interval == "P05–P95 (90%)":
@@ -958,9 +934,11 @@ with tab_weekly:
     hi_vals  = wdf[hi_col].values
     weeks    = wdf["week"].values
 
+    # Error bar half-widths (plotly uses symmetric +/-, we show asymmetric)
     err_plus  = hi_vals - bar_vals
     err_minus = bar_vals - lo_vals
 
+    # ── Colour each bar by risk zone ─────────────────────────────────────────
     def bar_color(price, be):
         if price <= be:
             return RED_CLR
@@ -971,6 +949,7 @@ with tab_weekly:
 
     colors = [bar_color(v, breakeven) for v in bar_vals]
 
+    # ── KPI summary strip ─────────────────────────────────────────────────────
     st.markdown('<div class="section-header">Weekly Price Prediction</div>', unsafe_allow_html=True)
 
     w1, w2, w3, w4, w5 = st.columns(5)
@@ -984,6 +963,8 @@ with tab_weekly:
     w5.metric("Peak Forecast Week", f"Week {peak_wk}", f"₱{bar_vals[peak_wk-1]:,.0f}")
 
     st.markdown("")
+
+    # ── Risk legend ───────────────────────────────────────────────────────────
     st.markdown(
         f'<span class="info-pill" style="background:#2d1a1a;color:{RED_CLR}">🔴 At / below break-even</span>'
         f'<span class="info-pill" style="background:#2b2000;color:{AMBER}">🟡 Within 5% of break-even</span>'
@@ -993,8 +974,10 @@ with tab_weekly:
     )
     st.markdown("")
 
+    # ── Main bar chart ────────────────────────────────────────────────────────
     fig_w = go.Figure()
 
+    # Confidence interval as a shaded area overlay
     fig_w.add_trace(go.Scatter(
         x=np.concatenate([weeks, weeks[::-1]]),
         y=np.concatenate([hi_vals, lo_vals[::-1]]),
@@ -1005,6 +988,7 @@ with tab_weekly:
         hoverinfo="skip",
     ))
 
+    # Bars — coloured by risk zone
     fig_w.add_trace(go.Bar(
         x=weeks,
         y=bar_vals,
@@ -1035,6 +1019,7 @@ with tab_weekly:
         ),
     ))
 
+    # Break-even line
     fig_w.add_hline(
         y=breakeven,
         line_dash="dash", line_color=RED_CLR, line_width=1.5,
@@ -1043,6 +1028,7 @@ with tab_weekly:
         annotation_position="top right",
     )
 
+    # Spot price line
     fig_w.add_hline(
         y=S0,
         line_dash="dot", line_color=GOLD, line_width=1,
@@ -1051,6 +1037,7 @@ with tab_weekly:
         annotation_position="bottom right",
     )
 
+    # Optional: mean-reversion long-run mean reference for OU model
     if "Mean-Reverting" in model:
         fig_w.add_hline(
             y=theta,
@@ -1104,6 +1091,7 @@ with tab_weekly:
 
     st.plotly_chart(fig_w, use_container_width=True)
 
+    # ── Trend annotation ──────────────────────────────────────────────────────
     trend_pct = (bar_vals[-1] / S0 - 1) * 100
     trend_dir = "📈 upward" if trend_pct > 1 else ("📉 downward" if trend_pct < -1 else "➡️ flat")
     st.caption(
@@ -1114,6 +1102,7 @@ with tab_weekly:
         f"Based on {N_sim_int:,} Monte Carlo paths."
     )
 
+    # ── Detailed weekly table ─────────────────────────────────────────────────
     with st.expander("📋 View detailed weekly forecast table"):
         tbl_rows = []
         for _, row in wdf.iterrows():
@@ -1140,6 +1129,7 @@ with tab_weekly:
         tbl_df = pd.DataFrame(tbl_rows)
         st.dataframe(tbl_df, use_container_width=True, hide_index=True, height=400)
 
+        # Download button
         st.download_button(
             "⬇️ Download Weekly Forecast CSV",
             data=tbl_df.to_csv(index=False),
@@ -1149,93 +1139,9 @@ with tab_weekly:
         )
 
 
-# ════════════════════════════════════════════════════════════════════════════════
-# TAB 4 — Comments
-# ════════════════════════════════════════════════════════════════════════════════
-with tab_comments:
-    st.markdown('<div class="section-header">💬 Comments & Feedback</div>', unsafe_allow_html=True)
-    st.markdown(
-        '<div class="info-box">Share your observations, questions, or feedback about the model. '
-        'Comments are stored for the duration of this session.</div>',
-        unsafe_allow_html=True
-    )
-
-    # ── New comment form ──────────────────────────────────────────────────────
-    with st.form("comment_form", clear_on_submit=True):
-        form_name_col, form_cat_col = st.columns([1, 2])
-        with form_name_col:
-            commenter_name = st.text_input(
-                "Your name",
-                placeholder="e.g. Juan dela Cruz",
-                max_chars=60,
-            )
-        with form_cat_col:
-            comment_category = st.selectbox(
-                "Category",
-                ["💡 Suggestion", "🐛 Bug / Issue", "📊 Data Observation", "❓ Question", "✅ General Feedback"],
-            )
-        comment_text = st.text_area(
-            "Comment",
-            placeholder="Write your comment here…",
-            max_chars=1000,
-            height=120,
-        )
-        submitted = st.form_submit_button("📨 Post Comment", use_container_width=True)
-
-        if submitted:
-            if not commenter_name.strip():
-                st.warning("Please enter your name before posting.")
-            elif not comment_text.strip():
-                st.warning("Please write a comment before posting.")
-            else:
-                import datetime
-                st.session_state["comments"].append({
-                    "name":     commenter_name.strip(),
-                    "category": comment_category,
-                    "text":     comment_text.strip(),
-                    "time":     datetime.datetime.now().strftime("%b %d, %Y · %H:%M"),
-                })
-                st.success("✅ Comment posted!")
-                st.rerun()
-
-    st.markdown("")
-
-    # ── Display comments ──────────────────────────────────────────────────────
-    comments = st.session_state["comments"]
-
-    if not comments:
-        st.markdown(
-            '<div style="text-align:center;color:#4b5563;padding:2.5rem 1rem;font-size:0.9rem;'
-            'background:#0f1923;border:1px dashed #1e2d3d;border-radius:10px;">'
-            '🗨️ No comments yet. Be the first to leave feedback!</div>',
-            unsafe_allow_html=True
-        )
-    else:
-        col_count, col_clear = st.columns([3, 1])
-        with col_count:
-            st.markdown(f"**{len(comments)} comment{'s' if len(comments) != 1 else ''}** (newest first)")
-        with col_clear:
-            if st.button("🗑️ Clear all", use_container_width=True):
-                st.session_state["comments"] = []
-                st.rerun()
-
-        st.markdown("")
-        for c in reversed(comments):
-            st.markdown(
-                f'<div class="comment-box">'
-                f'<span class="comment-author">👤 {c["name"]}</span>'
-                f'<span class="comment-time">{c["time"]}</span>'
-                f'&nbsp;&nbsp;<span class="info-pill">{c["category"]}</span>'
-                f'<div class="comment-text">{c["text"]}</div>'
-                f'</div>',
-                unsafe_allow_html=True
-            )
-
-
 # ── Footer ─────────────────────────────────────────────────────────────────────
 st.markdown("---")
-st.markdown(
-    "📄 [**Readme File**](https://github.com/squatic/MITA/blob/main/README.md) &nbsp;·&nbsp; "
+st.caption(
     "Mill-gate raw sugar price model. "
     "GBM assumes lognormally distributed returns. "
     "Mean-Reverting uses an Ornstein–Uhlenbeck process on log-prices. "
