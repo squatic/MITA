@@ -1141,6 +1141,7 @@ with tab_weekly:
 
 # ── Footer ─────────────────────────────────────────────────────────────────────
 st.markdown("---")
+url('https://github.com/squatic/MITA/blob/main/README.md')'Readme'
 st.caption(
     "Mill-gate raw sugar price model. "
     "GBM assumes lognormally distributed returns. "
