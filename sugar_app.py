@@ -1,7 +1,7 @@
 """
-Sugar Price Monte Carlo Risk Model — with integrated Parameter Estimator
+Sugar Price Monte Carlo Risk Model — with integrated Parameter Estimator + SugarBot
 Run with: streamlit run sugar_app.py
-Requires: pip install streamlit plotly numpy scipy matplotlib pandas
+Requires: pip install streamlit plotly numpy scipy matplotlib pandas anthropic
 """
 import streamlit as st
 import numpy as np
@@ -10,6 +10,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import matplotlib.pyplot as plt
 from scipy import stats
+import anthropic
 
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -135,6 +136,84 @@ st.markdown("""
     border: 1px solid #52c87a !important;
   }
   .apply-btn > button:hover { background: #255c37 !important; }
+
+  /* ── SugarBot Chat Styles ── */
+  .sugarbot-container {
+    background: #0a1520;
+    border: 1px solid #1e2d3d;
+    border-radius: 16px;
+    padding: 0;
+    overflow: hidden;
+    box-shadow: 0 4px 32px rgba(0,0,0,0.4);
+  }
+  .sugarbot-header {
+    background: linear-gradient(135deg, #0f1923 0%, #162030 100%);
+    border-bottom: 1px solid #1e2d3d;
+    padding: 16px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .chat-bubble-user {
+    background: #1e3a2f;
+    border: 1px solid #2a5040;
+    color: #b8e8c8;
+    border-radius: 16px 16px 4px 16px;
+    padding: 10px 16px;
+    margin: 4px 0;
+    max-width: 80%;
+    margin-left: auto;
+    font-size: 0.88rem;
+    line-height: 1.5;
+  }
+  .chat-bubble-bot {
+    background: #0f1f2e;
+    border: 1px solid #1e2d3d;
+    color: #c9bfac;
+    border-radius: 16px 16px 16px 4px;
+    padding: 10px 16px;
+    margin: 4px 0;
+    max-width: 85%;
+    font-size: 0.88rem;
+    line-height: 1.5;
+  }
+  .chat-message-row {
+    padding: 6px 0;
+  }
+  .stChatMessage {
+    background: transparent !important;
+  }
+  /* Style the chat input */
+  .stChatInputContainer {
+    background: #0f1923 !important;
+    border-top: 1px solid #1e2d3d !important;
+  }
+  .stChatInputContainer textarea {
+    background: #0a1520 !important;
+    color: #c9bfac !important;
+    border: 1px solid #1e2d3d !important;
+    border-radius: 10px !important;
+    font-family: 'DM Sans', sans-serif !important;
+  }
+  /* Suggestion chips */
+  .suggestion-chip {
+    display: inline-block;
+    background: #0f1923;
+    border: 1px solid #2a3d50;
+    color: #7ab8d4;
+    border-radius: 20px;
+    padding: 5px 14px;
+    font-size: 0.78rem;
+    margin: 3px 3px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: 'DM Sans', sans-serif;
+  }
+  .suggestion-chip:hover {
+    background: #1e2d3d;
+    border-color: #4a9fb5;
+    color: #a8d8ea;
+  }
 </style>
 """, unsafe_allow_html=True)
 
@@ -248,7 +327,6 @@ def run_mean_revert_paths(S0, kappa, theta, sigma, T, steps_per_year, K, seed):
 # ── Weekly Prediction Engine ───────────────────────────────────────────────────
 
 def run_weekly_gbm(S0, mu, sigma, n_weeks, N_sim, seed):
-    """Run GBM week-by-week, returning stats at each week."""
     rng = np.random.default_rng(seed)
     dt  = 1 / 52
     prices = np.full(N_sim, S0, dtype=float)
@@ -269,7 +347,6 @@ def run_weekly_gbm(S0, mu, sigma, n_weeks, N_sim, seed):
 
 
 def run_weekly_ou(S0, kappa, theta, sigma, n_weeks, N_sim, seed):
-    """Run OU week-by-week, returning stats at each week."""
     rng      = np.random.default_rng(seed)
     dt       = 1 / 52
     ln_theta = np.log(theta) - sigma**2 / (2 * kappa)
@@ -300,11 +377,112 @@ _defaults = {
     "param_kappa": 0.60,
     "param_theta": 2400.0,
     "params_applied": False,
-    "applied_from": None,   # "GBM" or "OU" — tracks which estimation was applied
+    "applied_from": None,
 }
 for _k, _v in _defaults.items():
     if _k not in st.session_state:
         st.session_state[_k] = _v
+
+# SugarBot chat history
+if "sugarbot_messages" not in st.session_state:
+    st.session_state["sugarbot_messages"] = []
+
+
+# ── SugarBot System Prompt ─────────────────────────────────────────────────────
+
+SUGARBOT_SYSTEM = """You are SugarBot 🍬, a friendly and knowledgeable assistant embedded inside the Sugar Price Monte Carlo Risk Model — a Streamlit app for Philippine mill-gate raw sugar price analysis and risk forecasting.
+
+Your job is to help users understand and use this application. You speak in a warm, clear, professional tone. Keep responses concise but thorough. Use bullet points or short paragraphs. Avoid jargon unless you explain it.
+
+## About the App
+
+The app has 3 main tabs plus a chatbot (you):
+
+### 📊 Tab 1 — Parameter Estimator
+- Users upload a historical CSV of sugar prices
+- The app computes GBM and OU parameters automatically
+- Outputs: annual drift μ, volatility σ, mean reversion speed κ, long-run mean θ, half-life
+- Users can click "Apply Parameters" to send these directly to the simulation
+
+### 🎲 Tab 2 — Monte Carlo Simulation
+- Users click "▶ Run Simulation" in the sidebar to generate results
+- Shows terminal price distribution at the forecast horizon
+- Key outputs: Mean, Median, VaR 95%, P(price ≤ break-even), Expected Shortfall
+- Sub-tabs: Distribution histogram, Price Paths chart, Percentile Table
+
+### 📅 Tab 3 — Weekly Price Prediction
+- Shows week-by-week forecasted prices for up to 104 weeks
+- Bar chart coloured by risk zone: 🔴 at/below break-even, 🟡 within 5%, 🟢 safe
+- Users can choose Median or Mean as the central estimate, and P05–P95 or P25–P75 confidence bands
+
+## Sidebar Controls
+
+**Model Setup:**
+- Price model: GBM (Lognormal) — good for trending markets; Mean-Reverting (OU) — good for commodities that snap back to a long-run price
+- Current spot price in ₱/Lkg
+- Forecast horizon: in Weeks, Months, or Years
+
+**Historical Data (optional):**
+- Upload a CSV with a price column
+- Select data frequency (Daily/Weekly/Monthly/Yearly)
+- Estimated parameters appear and can be applied with one click
+
+**Model Parameters (manual entry):**
+- GBM: Annual drift μ (use Itô-corrected value), Annual volatility σ
+- Mean-Reverting: κ (reversion speed), θ (long-run mean in ₱/Lkg), σ (volatility)
+
+**Risk & Volume:**
+- Break-even price: triggers risk alerts when price may fall below this
+- Annual volume: multiplied by VaR to compute Revenue at Risk
+
+**Simulation Settings:**
+- N: number of terminal simulations (5,000 default)
+- K: number of sample paths to draw on chart (30 default)
+- Random seed: for reproducibility
+
+**Weekly Prediction Settings:**
+- Weeks to forecast (4–104)
+- Bar shows: Median or Mean
+- Confidence interval: P05–P95 (90%) or P25–P75 (50%)
+
+## Key Concepts
+
+**GBM (Geometric Brownian Motion):** Assumes prices grow/fall with a trend plus random shocks. Good when you expect a directional trend.
+
+**OU (Ornstein-Uhlenbeck / Mean-Reverting):** Assumes prices drift back toward a long-run average (θ). Common in commodity markets. The speed κ controls how fast — higher κ means faster snap-back. Half-life = ln(2)/κ.
+
+**VaR 95% (Value at Risk):** The worst expected loss in the bottom 5% of outcomes. Calculated as: Spot Price − P05.
+
+**Expected Shortfall (ES):** The average price across all scenarios at or below P05. A more conservative risk measure than VaR.
+
+**Itô-Corrected Drift:** In GBM, the drift input should be μ − σ²/2 (Itô correction) to match the expected log-price growth. The estimator does this automatically.
+
+**P05, P25, P50, P75, P95:** Percentiles of the simulated price distribution at the forecast horizon.
+
+## CSV Format
+The uploaded CSV should have:
+- One column with historical prices (numeric, in ₱/Lkg)
+- Optionally a date column
+- At least 10 rows; 36+ recommended for monthly data
+
+## Common Questions
+
+**"How do I get started?"**
+→ Enter your spot price and horizon in the sidebar, choose a model, set parameters (or upload CSV to auto-estimate), then click ▶ Run Simulation.
+
+**"Which model should I use?"**
+→ Use GBM if prices have a clear upward/downward trend. Use Mean-Reverting if sugar prices tend to stabilize around a known level (typical for regulated/mill-gate prices).
+
+**"What does κ mean?"**
+→ κ is mean-reversion speed. κ = 0.6 means prices revert to θ with a half-life of about 1.15 years. Higher κ = faster snap-back.
+
+**"My κ is negative — what does that mean?"**
+→ Negative κ means the data shows no mean reversion — prices are actually diverging. Switch to the GBM model instead.
+
+**"What CSV should I upload?"**
+→ A simple spreadsheet with a price column (e.g., monthly mill-gate prices in ₱/Lkg). Just export from Excel as CSV.
+
+Always be helpful, encouraging, and specific. If you don't know something, say so honestly."""
 
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
@@ -312,8 +490,6 @@ with st.sidebar:
     st.markdown("##  🍬 Sugar Price\nMonte Carlo Risk Model")
     st.markdown("---")
 
-
-    # ── Model Setup ──────────────────────────────────────────────────────────
     st.markdown("### Model Setup")
     model = st.selectbox(
         "Price model",
@@ -341,7 +517,6 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # ── Historical Data Estimator ─────────────────────────────────────────────
     st.markdown("### 📁 Historical Data (optional)")
     st.markdown(
         '<div style="font-size:11px;color:#6b7280;font-family:\'IBM Plex Mono\',monospace;margin-bottom:8px">'
@@ -380,7 +555,6 @@ with st.sidebar:
                 gbm_est = compute_gbm_params(_prices, est_freq)
                 ou_est  = compute_ou_params(_prices, est_freq)
 
-                # Compact preview of estimated values
                 st.markdown(
                     '<div style="font-size:11px;color:#000000;font-family:\'IBM Plex Mono\',monospace;margin:8px 0 4px 0">'
                     'ESTIMATED PARAMS</div>', unsafe_allow_html=True
@@ -434,7 +608,6 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # ── Model Parameters ──────────────────────────────────────────────────────
     st.markdown("### Model Parameters")
     if st.session_state["params_applied"]:
         st.markdown(
@@ -457,7 +630,6 @@ with st.sidebar:
             step=0.001, format="%.4f",
             help="Annualised standard deviation of log returns."
         )
-        # Persist manual edits back to session state
         st.session_state["param_mu"]    = mu
         st.session_state["param_sigma"] = sigma
     else:
@@ -481,7 +653,6 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # ── Risk & Volume ─────────────────────────────────────────────────────────
     st.markdown("### Risk & Volume")
     breakeven = st.number_input("Break-even / alert price (₱/Lkg)", min_value=0.0, value=2000.0, step=50.0)
     volume    = st.number_input("Annual volume (Lkg, 0 = ignore)", min_value=0.0, value=0.0, step=1000.0)
@@ -509,7 +680,7 @@ with st.sidebar:
         help="Error bars around the weekly bar."
     )
 
-    run   = st.button("▶  Run Simulation", use_container_width=True)
+    run = st.button("▶  Run Simulation", use_container_width=True)
 
 
 # ── Title ──────────────────────────────────────────────────────────────────────
@@ -533,10 +704,11 @@ RED_CLR  = "#e05252"
 GREEN_OK = "#52c87a"
 AMBER    = "#f59e0b"
 
-tab_est, tab_sim, tab_weekly = st.tabs([
+tab_est, tab_sim, tab_weekly, tab_bot = st.tabs([
     "📊 Parameter Estimator",
     "🎲 Monte Carlo Simulation",
     "📅 Weekly Price Prediction",
+    "🍬 SugarBot",
 ])
 
 
@@ -559,7 +731,6 @@ with tab_est:
     else:
         prices_est = df_raw[price_col].dropna().values
 
-        # Guard: need enough data
         if len(prices_est) < 10:
             st.error("Need at least 10 data points.")
             st.stop()
@@ -572,7 +743,6 @@ with tab_est:
                 f"For {est_freq.lower()} data, at least {min_rec} rows are recommended for reliable estimates."
             )
 
-        # Date index
         if date_col and date_col != "None":
             try:
                 dates_est = pd.to_datetime(df_raw[date_col].dropna().values[:len(prices_est)])
@@ -586,7 +756,6 @@ with tab_est:
         N_ann = annualization_factor(est_freq)
         dt    = dt_value(est_freq)
 
-        # ── Price History ──────────────────────────────────────────────────
         st.markdown('<div class="est-section-header">📊 Price History</div>', unsafe_allow_html=True)
         col_prev, col_chart = st.columns([1, 2])
 
@@ -609,7 +778,6 @@ with tab_est:
             st.pyplot(fig_px)
             plt.close()
 
-        # ── GBM Results ────────────────────────────────────────────────────
         st.markdown('<div class="est-section-header">📈 GBM Parameters</div>', unsafe_allow_html=True)
 
         g1, g2, g3, g4 = st.columns(4)
@@ -645,7 +813,6 @@ with tab_est:
         st.pyplot(fig_lr)
         plt.close()
 
-        # ── OU Results ──────────────────────────────────────────────────────
         st.markdown('<div class="est-section-header">🔄 Ornstein-Uhlenbeck Parameters</div>', unsafe_allow_html=True)
 
         if ou["k"] <= 0:
@@ -703,7 +870,6 @@ with tab_est:
         st.pyplot(fig_reg)
         plt.close()
 
-        # ── Summary Table + Apply ───────────────────────────────────────────
         st.markdown('<div class="est-section-header">📋 Summary — Values to Use in Your Simulation</div>', unsafe_allow_html=True)
 
         N_ann_est = annualization_factor(est_freq)
@@ -783,7 +949,6 @@ with tab_sim:
     prob_be  = float(np.mean(terminal <= breakeven))
     rev_risk = var95 * volume if volume > 0 else None
 
-    # ── KPI row ───────────────────────────────────────────────────────────────
     st.markdown('<div class="section-header">Key Statistics at Horizon</div>', unsafe_allow_html=True)
     k1, k2, k3, k4, k5 = st.columns(5)
     k1.metric("Mean Price",              f"₱{mean_p:,.0f}",  f"{(mean_p/S0-1)*100:+.1f}% vs spot")
@@ -803,11 +968,9 @@ with tab_sim:
     if rev_risk is not None:
         st.markdown(f'<div class="alert-danger" style="margin-top:6px">Revenue at Risk (VaR × Volume): <b>₱{rev_risk:,.0f}</b></div>', unsafe_allow_html=True)
 
-    # ── Charts ────────────────────────────────────────────────────────────────
     st.markdown('<div class="section-header">Price Distribution at Horizon</div>', unsafe_allow_html=True)
     tab_dist, tab_paths, tab_pct = st.tabs(["📊 Distribution", "📈 Price Paths", "🔢 Percentile Table"])
 
-    # Distribution
     with tab_dist:
         fig = go.Figure()
         fig.add_trace(go.Histogram(x=terminal, nbinsx=80, name="Simulated prices",
@@ -843,7 +1006,6 @@ with tab_sim:
         c4.metric("P95 (best 5%)",   f"₱{p95:,.0f}",  f"{(p95/S0-1)*100:+.1f}% vs spot")
         st.caption(f"Expected Shortfall (avg price when ≤ P05): **₱{es95:,.0f}/Lkg**  —  Based on {N_sim:,} simulations.")
 
-    # Paths
     with tab_paths:
         if horizon_unit == "Weeks":
             times_display = times * 52
@@ -885,7 +1047,6 @@ with tab_sim:
         st.plotly_chart(fig2, use_container_width=True)
         st.caption(f"Showing {display_k} sample paths with P05–P95 and P25–P75 confidence bands.")
 
-    # Percentile table
     with tab_pct:
         pcts = [1, 5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 75, 80, 85, 90, 95, 99]
         vals = np.percentile(terminal, pcts)
@@ -919,7 +1080,6 @@ with tab_weekly:
         else:
             wdf = run_weekly_ou(S0, kappa, theta, sigma, n_weeks_int, N_sim_int, seed + 99)
 
-    # ── Determine bar centre & interval ──────────────────────────────────────
     bar_col   = "median" if weekly_display == "Median (P50)" else "mean"
     bar_label = "Median" if weekly_display == "Median (P50)" else "Mean"
     if weekly_interval == "P05–P95 (90%)":
@@ -934,11 +1094,9 @@ with tab_weekly:
     hi_vals  = wdf[hi_col].values
     weeks    = wdf["week"].values
 
-    # Error bar half-widths (plotly uses symmetric +/-, we show asymmetric)
     err_plus  = hi_vals - bar_vals
     err_minus = bar_vals - lo_vals
 
-    # ── Colour each bar by risk zone ─────────────────────────────────────────
     def bar_color(price, be):
         if price <= be:
             return RED_CLR
@@ -949,7 +1107,6 @@ with tab_weekly:
 
     colors = [bar_color(v, breakeven) for v in bar_vals]
 
-    # ── KPI summary strip ─────────────────────────────────────────────────────
     st.markdown('<div class="section-header">Weekly Price Prediction</div>', unsafe_allow_html=True)
 
     w1, w2, w3, w4, w5 = st.columns(5)
@@ -963,8 +1120,6 @@ with tab_weekly:
     w5.metric("Peak Forecast Week", f"Week {peak_wk}", f"₱{bar_vals[peak_wk-1]:,.0f}")
 
     st.markdown("")
-
-    # ── Risk legend ───────────────────────────────────────────────────────────
     st.markdown(
         f'<span class="info-pill" style="background:#2d1a1a;color:{RED_CLR}">🔴 At / below break-even</span>'
         f'<span class="info-pill" style="background:#2b2000;color:{AMBER}">🟡 Within 5% of break-even</span>'
@@ -974,10 +1129,8 @@ with tab_weekly:
     )
     st.markdown("")
 
-    # ── Main bar chart ────────────────────────────────────────────────────────
     fig_w = go.Figure()
 
-    # Confidence interval as a shaded area overlay
     fig_w.add_trace(go.Scatter(
         x=np.concatenate([weeks, weeks[::-1]]),
         y=np.concatenate([hi_vals, lo_vals[::-1]]),
@@ -988,7 +1141,6 @@ with tab_weekly:
         hoverinfo="skip",
     ))
 
-    # Bars — coloured by risk zone
     fig_w.add_trace(go.Bar(
         x=weeks,
         y=bar_vals,
@@ -1019,7 +1171,6 @@ with tab_weekly:
         ),
     ))
 
-    # Break-even line
     fig_w.add_hline(
         y=breakeven,
         line_dash="dash", line_color=RED_CLR, line_width=1.5,
@@ -1027,8 +1178,6 @@ with tab_weekly:
         annotation_font_color=RED_CLR,
         annotation_position="top right",
     )
-
-    # Spot price line
     fig_w.add_hline(
         y=S0,
         line_dash="dot", line_color=GOLD, line_width=1,
@@ -1037,7 +1186,6 @@ with tab_weekly:
         annotation_position="bottom right",
     )
 
-    # Optional: mean-reversion long-run mean reference for OU model
     if "Mean-Reverting" in model:
         fig_w.add_hline(
             y=theta,
@@ -1048,50 +1196,31 @@ with tab_weekly:
         )
 
     fig_w.update_layout(
-        paper_bgcolor=DARK_BG,
-        plot_bgcolor=DARK_BG,
-        font_color=TEXT_CLR,
+        paper_bgcolor=DARK_BG, plot_bgcolor=DARK_BG, font_color=TEXT_CLR,
         font_family="DM Sans, sans-serif",
         xaxis=dict(
-            title="Week from Today",
-            gridcolor=GRID_CLR,
-            zeroline=False,
-            tickmode="linear",
-            tick0=1,
-            dtick=max(1, n_weeks_int // 13),
+            title="Week from Today", gridcolor=GRID_CLR, zeroline=False,
+            tickmode="linear", tick0=1, dtick=max(1, n_weeks_int // 13),
             tickfont=dict(size=11),
         ),
         yaxis=dict(
-            title="Predicted Price (₱/Lkg)",
-            gridcolor=GRID_CLR,
-            zeroline=False,
-            tickprefix="₱",
-            tickformat=",",
+            title="Predicted Price (₱/Lkg)", gridcolor=GRID_CLR, zeroline=False,
+            tickprefix="₱", tickformat=",",
         ),
         legend=dict(
-            bgcolor=DARK_BG,
-            bordercolor=GRID_CLR,
-            borderwidth=1,
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1,
+            bgcolor=DARK_BG, bordercolor=GRID_CLR, borderwidth=1,
+            orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
         ),
-        bargap=0.25,
-        margin=dict(t=60, b=60, l=70, r=30),
-        height=500,
+        bargap=0.25, margin=dict(t=60, b=60, l=70, r=30), height=500,
         title=dict(
             text=f"Week-by-Week {bar_label} Sugar Price Forecast · {n_weeks_int} Weeks · {model}",
             font=dict(family="DM Serif Display, serif", size=16, color="#8ab4cc"),
-            x=0.0,
-            xanchor="left",
+            x=0.0, xanchor="left",
         ),
     )
 
     st.plotly_chart(fig_w, use_container_width=True)
 
-    # ── Trend annotation ──────────────────────────────────────────────────────
     trend_pct = (bar_vals[-1] / S0 - 1) * 100
     trend_dir = "📈 upward" if trend_pct > 1 else ("📉 downward" if trend_pct < -1 else "➡️ flat")
     st.caption(
@@ -1102,7 +1231,6 @@ with tab_weekly:
         f"Based on {N_sim_int:,} Monte Carlo paths."
     )
 
-    # ── Detailed weekly table ─────────────────────────────────────────────────
     with st.expander("📋 View detailed weekly forecast table"):
         tbl_rows = []
         for _, row in wdf.iterrows():
@@ -1128,9 +1256,6 @@ with tab_weekly:
             })
         tbl_df = pd.DataFrame(tbl_rows)
         st.dataframe(tbl_df, use_container_width=True, hide_index=True, height=400)
-        
-
-        # Download button
         st.download_button(
             "⬇️ Download Weekly Forecast CSV",
             data=tbl_df.to_csv(index=False),
@@ -1138,9 +1263,175 @@ with tab_weekly:
             mime="text/csv",
             use_container_width=False,
         )
-st.markdown("---")
-st.markdown("### 🍬 SugarBot — Ask me anything about this app")
-components.iframe("https://github.com/squatic/montecarlo-chatbot/", height=650, scrolling=True)
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# TAB 4 — SugarBot Chatbot
+# ════════════════════════════════════════════════════════════════════════════════
+with tab_bot:
+
+    # ── Header ────────────────────────────────────────────────────────────────
+    st.markdown("""
+    <div style="background:linear-gradient(135deg,#0f1923,#162030);border:1px solid #1e2d3d;
+                border-radius:16px;padding:20px 24px;margin-bottom:20px;">
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:8px;">
+        <span style="font-size:2rem">🍬</span>
+        <div>
+          <div style="font-family:'DM Serif Display',serif;font-size:1.4rem;color:#e8dcc8">SugarBot</div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#4a9fb5;
+                      text-transform:uppercase;letter-spacing:0.1em">
+            Your Sugar Price Model Assistant
+          </div>
+        </div>
+        <div style="margin-left:auto;background:#122d1e;border:1px solid #52c87a;border-radius:20px;
+                    padding:3px 12px;font-size:11px;color:#52c87a;font-family:'IBM Plex Mono',monospace">
+          ● Online
+        </div>
+      </div>
+      <div style="font-size:13px;color:#7a8fa8;font-family:'DM Sans',sans-serif;line-height:1.5">
+        Ask me anything about how to use this app — model selection, uploading CSV data,
+        reading results, interpreting risk metrics, and more.
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── API key input ─────────────────────────────────────────────────────────
+    api_key = st.text_input(
+        "🔑 Anthropic API Key",
+        type="password",
+        placeholder="sk-ant-...",
+        help="Get your key at console.anthropic.com. It is not stored anywhere.",
+    )
+
+    if not api_key:
+        st.markdown("""
+        <div class="info-box">
+          Enter your <b>Anthropic API key</b> above to activate SugarBot.<br>
+          Get one free at <a href="https://console.anthropic.com" target="_blank"
+          style="color:#4a9fb5">console.anthropic.com</a>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # ── Suggestion chips ──────────────────────────────────────────────────────
+    st.markdown("**💡 Quick questions — click to ask:**")
+
+    suggestions = [
+        "How do I get started?",
+        "GBM vs Mean-Reverting — which should I use?",
+        "How do I upload a CSV?",
+        "What does VaR 95% mean?",
+        "What is κ (kappa)?",
+        "How do I read the weekly forecast chart?",
+        "What is Expected Shortfall?",
+        "What does the break-even price do?",
+        "How do I interpret P05 and P95?",
+        "What is the Itô-corrected drift?",
+    ]
+
+    # Render chips as buttons in rows of 3
+    chip_cols = st.columns(3)
+    for i, suggestion in enumerate(suggestions):
+        with chip_cols[i % 3]:
+            if st.button(suggestion, key=f"chip_{i}", use_container_width=True):
+                st.session_state["sugarbot_messages"].append({
+                    "role": "user",
+                    "content": suggestion
+                })
+                st.session_state["_sugarbot_trigger"] = True
+                st.rerun()
+
+    st.markdown("---")
+
+    # ── Chat history display ──────────────────────────────────────────────────
+    if not st.session_state["sugarbot_messages"]:
+        st.markdown("""
+        <div style="text-align:center;padding:32px;color:#4a5568;">
+          <div style="font-size:2.5rem;margin-bottom:12px">🍬</div>
+          <div style="font-family:'DM Serif Display',serif;font-size:1.1rem;color:#6b7280;margin-bottom:6px">
+            No messages yet
+          </div>
+          <div style="font-size:13px;color:#4a5568">
+            Click a suggestion above or type your question below
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        for msg in st.session_state["sugarbot_messages"]:
+            if msg["role"] == "user":
+                with st.chat_message("user", avatar="👤"):
+                    st.markdown(msg["content"])
+            else:
+                with st.chat_message("assistant", avatar="🍬"):
+                    st.markdown(msg["content"])
+
+    # ── Auto-respond if chip was clicked ─────────────────────────────────────
+    if st.session_state.get("_sugarbot_trigger") and api_key:
+        st.session_state["_sugarbot_trigger"] = False
+        try:
+            client = anthropic.Anthropic(api_key=api_key)
+            with st.chat_message("assistant", avatar="🍬"):
+                with st.spinner("SugarBot is thinking…"):
+                    response = client.messages.create(
+                        model="claude-sonnet-4-20250514",
+                        max_tokens=1000,
+                        system=SUGARBOT_SYSTEM,
+                        messages=st.session_state["sugarbot_messages"],
+                    )
+                    reply = response.content[0].text
+                    st.markdown(reply)
+            st.session_state["sugarbot_messages"].append({
+                "role": "assistant",
+                "content": reply
+            })
+            st.rerun()
+        except Exception as e:
+            st.error(f"❌ API error: {e}")
+
+    # ── Chat input ────────────────────────────────────────────────────────────
+    user_input = st.chat_input(
+        "Ask SugarBot anything about this app…",
+        disabled=not api_key,
+    )
+
+    if user_input:
+        st.session_state["sugarbot_messages"].append({
+            "role": "user",
+            "content": user_input
+        })
+
+        if not api_key:
+            st.warning("Please enter your Anthropic API key above to chat with SugarBot.")
+        else:
+            try:
+                client = anthropic.Anthropic(api_key=api_key)
+                with st.chat_message("assistant", avatar="🍬"):
+                    with st.spinner("SugarBot is thinking…"):
+                        response = client.messages.create(
+                            model="claude-sonnet-4-20250514",
+                            max_tokens=1000,
+                            system=SUGARBOT_SYSTEM,
+                            messages=st.session_state["sugarbot_messages"],
+                        )
+                        reply = response.content[0].text
+                        st.markdown(reply)
+                st.session_state["sugarbot_messages"].append({
+                    "role": "assistant",
+                    "content": reply
+                })
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ API error: {e}")
+                st.session_state["sugarbot_messages"].pop()
+
+    # ── Clear chat button ─────────────────────────────────────────────────────
+    if st.session_state["sugarbot_messages"]:
+        st.markdown("")
+        if st.button("🗑️ Clear conversation", use_container_width=False):
+            st.session_state["sugarbot_messages"] = []
+            st.rerun()
+
 
 # ── Footer ─────────────────────────────────────────────────────────────────────
 st.markdown("---")
