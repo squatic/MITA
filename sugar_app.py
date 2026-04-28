@@ -315,6 +315,11 @@ with st.sidebar:
     st.markdown("---")
 st.markdown("### 🍬 SugarBot — Ask me anything about this app")
 components.iframe("https://squatic.github.io/montecarlo-chatbot/", height=650, scrolling=True)
+    st.markdown(
+        '<div style="font-size:11px;color:#6b7280;font-family:\'IBM Plex Mono\',monospace;margin-bottom:8px">'
+        'Ask the SugarBot.</div>',
+        unsafe_allow_html=True
+    )
 
     # ── Model Setup ──────────────────────────────────────────────────────────
     st.markdown("### Model Setup")
