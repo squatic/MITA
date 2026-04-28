@@ -1138,7 +1138,9 @@ with tab_weekly:
             mime="text/csv",
             use_container_width=False,
         )
-
+# ── Chatbot ─────────────────────────────────────────────────────────────────────
+st.divider() st.subheader("🍬 MontecarloSugarBot — Ask me anything about this app") 
+components.iframe("https://github.com/squatic/montecarlo-chatbot/", height=650, scrolling=True)
 
 # ── Footer ─────────────────────────────────────────────────────────────────────
 st.markdown("---")
@@ -1148,6 +1150,3 @@ st.caption(
     "Mean-Reverting uses an Ornstein–Uhlenbeck process on log-prices. "
     "Results are probabilistic estimates, not forecasts."
 )
-# ── Chatbot ─────────────────────────────────────────────────────────────────────
-st.divider() st.subheader("🍬 MontecarloSugarBot — Ask me anything about this app") 
-components.iframe("https://github.com/squatic/montecarlo-chatbot/", height=650, scrolling=True)
