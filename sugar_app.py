@@ -313,6 +313,8 @@ with st.sidebar:
     st.markdown("##  🍬 Sugar Price\nMonte Carlo Risk Model")
     st.markdown("---")
 
+st.divider() st.markdown("##   🍬 SugarBot — Ask me anything about this app") 
+components.iframe("https://github.com/squatic/montecarlo-chatbot/", height=650, scrolling=True)'Ask me'
 
     # ── Model Setup ──────────────────────────────────────────────────────────
     st.markdown("### Model Setup")
