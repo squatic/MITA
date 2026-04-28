@@ -312,7 +312,7 @@ for _k, _v in _defaults.items():
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("##  🍬 Sugar Price\nMonte Carlo Risk Model")
-    components.iframe("https://github.com/squatic/montecarlo-chatbot", height=600)
+    components.iframe("https://YOUR-USERNAME.github.io/sugar-chatbot/", height=500)
     st.markdown("---")
 
     # ── Model Setup ──────────────────────────────────────────────────────────
