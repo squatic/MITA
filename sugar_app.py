@@ -138,7 +138,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-
+st.markdown("---")
+st.markdown("### 🍬 SugarBot — Ask me anything about this app")
+components.iframe("https://github.com/squatic/montecarlo-chatbot/", height=650, scrolling=True)
 # ── Parameter Estimation Helpers ───────────────────────────────────────────────
 
 def annualization_factor(freq: str) -> int:
@@ -1138,9 +1140,6 @@ with tab_weekly:
             mime="text/csv",
             use_container_width=False,
         )
-st.markdown("---")
-st.markdown("### 🍬 SugarBot — Ask me anything about this app")
-components.iframe("https://github.com/squatic/montecarlo-chatbot/", height=650, scrolling=True)
 
 # ── Footer ─────────────────────────────────────────────────────────────────────
 st.markdown("---")
