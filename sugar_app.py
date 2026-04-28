@@ -385,7 +385,7 @@ with st.sidebar:
                 )
                 if "GBM" in model:
                     st.markdown(
-                        f'<div style="font-size:12px;color:#c9bfac;font-family:\'IBM Plex Mono\',monospace;line-height:1.8">'
+                        f'<div style="font-size:12px;color:#d4a843;font-family:\'IBM Plex Mono\',monospace;line-height:1.8">'
                         f'μ (Itô) = <b style="color:#d4a843">{gbm_est["mu_ito"]*100:.2f}%</b><br>'
                         f'σ annual = <b style="color:#4a9fb5">{gbm_est["sigma_annual"]*100:.2f}%</b>'
                         f'</div>', unsafe_allow_html=True
