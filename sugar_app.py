@@ -141,11 +141,25 @@ st.markdown("""
 
 # ── Parameter Estimation Helpers ───────────────────────────────────────────────
 
+_VALID_FREQS = ("Daily", "Weekly", "Monthly", "Yearly")
+_ANN_FACTORS = {"Daily": 252, "Weekly": 52, "Monthly": 12, "Yearly": 1}
+_DT_VALUES   = {"Daily": 1/252, "Weekly": 1/52, "Monthly": 1/12, "Yearly": 1.0}
+
+def _validate_freq(freq: str) -> None:
+    """BUG-05 FIX: Raise an informative ValueError for unsupported frequency strings
+    instead of the raw KeyError that dict-lookup would produce."""
+    if freq not in _VALID_FREQS:
+        raise ValueError(
+            f"Unknown frequency '{freq}'. Must be one of: {', '.join(_VALID_FREQS)}."
+        )
+
 def annualization_factor(freq: str) -> int:
-    return {"Daily": 252, "Weekly": 52, "Monthly": 12, "Yearly": 1}[freq]
+    _validate_freq(freq)
+    return _ANN_FACTORS[freq]
 
 def dt_value(freq: str) -> float:
-    return {"Daily": 1/252, "Weekly": 1/52, "Monthly": 1/12, "Yearly": 1.0}[freq]
+    _validate_freq(freq)
+    return _DT_VALUES[freq]
 
 
 def compute_gbm_params(prices: np.ndarray, freq: str) -> dict:
@@ -168,6 +182,13 @@ def compute_gbm_params(prices: np.ndarray, freq: str) -> dict:
 
 
 def compute_ou_params(prices: np.ndarray, freq: str) -> dict:
+    # BUG-01 FIX: ddof=2 in std() requires at least 3 residuals (denom = n-2 ≥ 1),
+    # which means at least 4 prices.  Fewer prices silently produce NaN sigma_ou.
+    if len(prices) < 4:
+        raise ValueError(
+            f"compute_ou_params requires at least 4 price observations "
+            f"(got {len(prices)}). With ddof=2, std() needs ≥ 3 residuals."
+        )
     dt         = dt_value(freq)
     N          = annualization_factor(freq)
     log_prices = np.log(prices)
@@ -177,7 +198,15 @@ def compute_ou_params(prices: np.ndarray, freq: str) -> dict:
     beta      = slope
     alpha     = intercept
     k         = -beta / dt
-    theta     = np.exp(-alpha / beta) if beta != 0 else np.nan
+    # BUG-03 FIX: theta = exp(-alpha/beta) is numerically unstable when beta ≈ 0
+    # because tiny noise in alpha gets amplified by the near-zero divisor.
+    # Use a stability threshold: if |beta| is too small, return NaN and let the
+    # UI's existing "κ ≤ 0" warning guide the user toward GBM instead.
+    _BETA_STABILITY_THRESHOLD = 1e-4
+    if abs(beta) < _BETA_STABILITY_THRESHOLD:
+        theta = np.nan   # cannot reliably estimate long-run mean; no reversion detected
+    else:
+        theta = np.exp(-alpha / beta)
     residuals = d_logP - (alpha + beta * logP_lag)
     sigma_ou  = np.std(residuals, ddof=2) / np.sqrt(dt)
     half_life_years   = np.log(2) / k if k > 0 else np.nan
@@ -198,15 +227,49 @@ def compute_ou_params(prices: np.ndarray, freq: str) -> dict:
     }
 
 
+# ── Simulation Input Validation ────────────────────────────────────────────────
+
+def _validate_sim_inputs(S0: float, sigma: float, label: str = "") -> None:
+    """BUG-02 FIX: validate shared simulation inputs before any computation so that
+    NaN / inf values (e.g. sigma_ou=NaN from a failed OU estimation) raise a clear
+    ValueError rather than silently cascading to all-NaN outputs."""
+    prefix = f"[{label}] " if label else ""
+    if not (np.isfinite(S0) and S0 > 0):
+        raise ValueError(f"{prefix}S0 must be a finite positive number (got {S0}).")
+    if not np.isfinite(sigma):
+        raise ValueError(
+            f"{prefix}sigma must be a finite number (got {sigma}). "
+            "This often happens when the OU estimator cannot compute sigma_ou because "
+            "the price series is too short, near-flat, or has no mean reversion. "
+            "Check the Parameter Estimator tab for details."
+        )
+    if sigma < 0:
+        raise ValueError(f"{prefix}sigma must be non-negative (got {sigma}).")
+
+
 # ── Simulation Engine ──────────────────────────────────────────────────────────
 
 def run_gbm_terminal(S0, mu, sigma, T, N, seed):
+    _validate_sim_inputs(S0, sigma, "run_gbm_terminal")
+    if not np.isfinite(mu):
+        raise ValueError(f"[run_gbm_terminal] mu must be a finite number (got {mu}).")
     rng = np.random.default_rng(seed)
     Z   = rng.standard_normal(N)
     return S0 * np.exp((mu - 0.5 * sigma**2) * T + sigma * np.sqrt(T) * Z)
 
 
 def run_mean_revert_terminal(S0, kappa, theta, sigma, T, N, steps_per_year, seed):
+    _validate_sim_inputs(S0, sigma, "run_mean_revert_terminal")
+    if not (np.isfinite(kappa) and kappa > 0):
+        raise ValueError(
+            f"[run_mean_revert_terminal] kappa must be a finite positive number (got {kappa})."
+        )
+    if not (np.isfinite(theta) and theta > 0):
+        raise ValueError(
+            f"[run_mean_revert_terminal] theta must be a finite positive number (got {theta}). "
+            "This can happen when the OU estimator returns NaN theta due to a near-flat or "
+            "non-mean-reverting price series. Check the Parameter Estimator tab."
+        )
     rng   = np.random.default_rng(seed)
     steps = max(1, int(T * steps_per_year))
     dt    = T / steps
@@ -220,6 +283,9 @@ def run_mean_revert_terminal(S0, kappa, theta, sigma, T, N, steps_per_year, seed
 
 
 def run_gbm_paths(S0, mu, sigma, T, steps_per_year, K, seed):
+    _validate_sim_inputs(S0, sigma, "run_gbm_paths")
+    if not np.isfinite(mu):
+        raise ValueError(f"[run_gbm_paths] mu must be a finite number (got {mu}).")
     rng   = np.random.default_rng(seed)
     steps = max(1, int(T * steps_per_year))
     dt    = T / steps
@@ -232,6 +298,16 @@ def run_gbm_paths(S0, mu, sigma, T, steps_per_year, K, seed):
 
 
 def run_mean_revert_paths(S0, kappa, theta, sigma, T, steps_per_year, K, seed):
+    _validate_sim_inputs(S0, sigma, "run_mean_revert_paths")
+    if not (np.isfinite(kappa) and kappa > 0):
+        raise ValueError(
+            f"[run_mean_revert_paths] kappa must be a finite positive number (got {kappa})."
+        )
+    if not (np.isfinite(theta) and theta > 0):
+        raise ValueError(
+            f"[run_mean_revert_paths] theta must be a finite positive number (got {theta}). "
+            "This can happen when OU estimation cannot determine the long-run mean."
+        )
     rng      = np.random.default_rng(seed)
     steps    = max(1, int(T * steps_per_year))
     dt       = T / steps
@@ -249,6 +325,9 @@ def run_mean_revert_paths(S0, kappa, theta, sigma, T, steps_per_year, K, seed):
 
 def run_weekly_gbm(S0, mu, sigma, n_weeks, N_sim, seed):
     """Run GBM week-by-week, returning stats at each week."""
+    _validate_sim_inputs(S0, sigma, "run_weekly_gbm")
+    if not np.isfinite(mu):
+        raise ValueError(f"[run_weekly_gbm] mu must be a finite number (got {mu}).")
     rng = np.random.default_rng(seed)
     dt  = 1 / 52
     prices = np.full(N_sim, S0, dtype=float)
@@ -270,6 +349,17 @@ def run_weekly_gbm(S0, mu, sigma, n_weeks, N_sim, seed):
 
 def run_weekly_ou(S0, kappa, theta, sigma, n_weeks, N_sim, seed):
     """Run OU week-by-week, returning stats at each week."""
+    _validate_sim_inputs(S0, sigma, "run_weekly_ou")
+    if not (np.isfinite(kappa) and kappa > 0):
+        raise ValueError(
+            f"[run_weekly_ou] kappa must be a finite positive number (got {kappa})."
+        )
+    if not (np.isfinite(theta) and theta > 0):
+        raise ValueError(
+            f"[run_weekly_ou] theta must be a finite positive number (got {theta}). "
+            "This can happen when OU estimation cannot determine the long-run mean "
+            "(e.g. near-flat or non-mean-reverting price series)."
+        )
     rng      = np.random.default_rng(seed)
     dt       = 1 / 52
     ln_theta = np.log(theta) - sigma**2 / (2 * kappa)
@@ -396,13 +486,17 @@ with st.sidebar:
                     th_val = ou_est["theta"]
                     sg_val = ou_est["sigma_ou"]
                     hl_val = ou_est["half_life_years"]
-                    hl_str = f"{hl_val:.2f} yr" if not np.isnan(hl_val) else "N/A"
-                    k_ok   = k_val > 0
+                    hl_str  = f"{hl_val:.2f} yr" if not np.isnan(hl_val) else "N/A"
+                    th_str  = f"₱{th_val:,.0f}" if not np.isnan(th_val) else "N/A ⚠"
+                    sig_str = f"{sg_val*100:.2f}%" if not np.isnan(sg_val) else "N/A ⚠"
+                    k_ok    = k_val > 0
+                    th_ok   = not np.isnan(th_val)
+                    sig_ok  = not np.isnan(sg_val)
                     st.markdown(
                         f'<div style="font-size:12px;color:#c9bfac;font-family:\'IBM Plex Mono\',monospace;line-height:1.8">'
                         f'κ = <b style="color:{"#d4a843" if k_ok else "#e05252"}">{k_val:.4f}</b><br>'
-                        f'θ = <b style="color:#d4a843">₱{th_val:,.0f}</b><br>'
-                        f'σ_ou = <b style="color:#4a9fb5">{sg_val*100:.2f}%</b><br>'
+                        f'θ = <b style="color:{"#d4a843" if th_ok else "#e05252"}">{th_str}</b><br>'
+                        f'σ_ou = <b style="color:{"#4a9fb5" if sig_ok else "#e05252"}">{sig_str}</b><br>'
                         f'Half-life = <b style="color:#9ca3af">{hl_str}</b>'
                         f'</div>', unsafe_allow_html=True
                     )
@@ -411,10 +505,23 @@ with st.sidebar:
                             '<div class="warn-box" style="margin-top:6px">⚠️ κ ≤ 0 — no mean reversion detected. GBM may suit this data better.</div>',
                             unsafe_allow_html=True
                         )
+                    if np.isnan(th_val):
+                        st.markdown(
+                            '<div class="warn-box" style="margin-top:6px">⚠️ θ could not be estimated (near-flat or trending prices). '
+                            'Cannot apply OU parameters — use GBM or enter θ manually.</div>',
+                            unsafe_allow_html=True
+                        )
+                    if np.isnan(sg_val):
+                        st.markdown(
+                            '<div class="warn-box" style="margin-top:6px">⚠️ σ_ou is NaN — too few data points for reliable OU estimation.</div>',
+                            unsafe_allow_html=True
+                        )
                     apply_label = "✅ Apply OU Parameters"
 
                 st.markdown("")
-                if st.button(apply_label, use_container_width=True):
+                # Disable apply if any critical OU param is NaN
+                _ou_apply_ok = not (np.isnan(ou_est["theta"]) or np.isnan(ou_est["sigma_ou"]))
+                if _ou_apply_ok and st.button(apply_label, use_container_width=True):
                     if "GBM" in model:
                         st.session_state["param_mu"]    = float(round(gbm_est["mu_ito"], 4))
                         st.session_state["param_sigma"] = float(round(gbm_est["sigma_annual"], 4))
@@ -652,12 +759,22 @@ with tab_est:
                 unsafe_allow_html=True
             )
 
+        if np.isnan(ou["theta"]):
+            st.markdown(
+                '<div class="warn-box">⚠️ θ could not be estimated — the OLS slope β is near zero, meaning prices show no mean reversion. '
+                'The long-run mean is numerically unstable and has been set to N/A. '
+                'Use GBM instead, or enter θ manually in the sidebar.</div>',
+                unsafe_allow_html=True
+            )
+
         o1, o2, o3, o4 = st.columns(4)
         o1.metric("Mean Reversion Speed κ", f"{ou['k']:.4f}",
                   help="Higher = faster price snap-back to long-run mean.")
-        o2.metric("Long-Run Mean θ",        f"{ou['theta']:,.2f}",
+        _theta_display = f"{ou['theta']:,.2f}" if not np.isnan(ou["theta"]) else "N/A"
+        o2.metric("Long-Run Mean θ",        _theta_display,
                   help=f"Price level the model gravitates toward ({price_col}).")
-        o3.metric("OU Volatility σ",        f"{ou['sigma_ou']*100:.2f}%",
+        _sigma_ou_display = f"{ou['sigma_ou']*100:.2f}%" if not np.isnan(ou["sigma_ou"]) else "N/A"
+        o3.metric("OU Volatility σ",        _sigma_ou_display,
                   help="Annualised OU volatility.")
         hl_label = f"{ou['half_life_years']:.2f} yrs" if not np.isnan(ou['half_life_years']) else "N/A"
         hl_delta = f"≈ {ou['half_life_periods']:.1f} {est_freq.lower()} periods" if not np.isnan(ou.get('half_life_periods', np.nan)) else None
@@ -714,7 +831,9 @@ with tab_est:
             "Value": [
                 f"{gbm['mu_annual']*100:.4f}%", f"{gbm['mu_ito']*100:.4f}%",
                 f"{gbm['sigma_annual']*100:.4f}%", f"{gbm['sigma_period']*100:.4f}%",
-                f"{ou['k']:.4f}", f"{ou['theta']:,.4f}", f"{ou['sigma_ou']*100:.4f}%",
+                f"{ou['k']:.4f}",
+                f"{ou['theta']:,.4f}" if not np.isnan(ou['theta']) else "N/A",
+                f"{ou['sigma_ou']*100:.4f}%" if not np.isnan(ou['sigma_ou']) else "N/A",
                 f"{ou['half_life_years']:.4f}" if not np.isnan(ou['half_life_years']) else "N/A",
                 f"{ou['half_life_periods']:.2f}" if not np.isnan(ou.get('half_life_periods', np.nan)) else "N/A",
             ],
@@ -737,7 +856,10 @@ with tab_est:
             )
         with apply_col:
             apply_target = "GBM" if "GBM" in model else "OU"
-            if st.button(f"✅ Apply {apply_target} Parameters to Simulation →", use_container_width=True):
+            _tab_apply_ok = ("GBM" in model) or (
+                not (np.isnan(ou["theta"]) or np.isnan(ou["sigma_ou"]))
+            )
+            if _tab_apply_ok and st.button(f"✅ Apply {apply_target} Parameters to Simulation →", use_container_width=True):
                 if "GBM" in model:
                     st.session_state["param_mu"]    = float(round(gbm["mu_ito"], 4))
                     st.session_state["param_sigma"] = float(round(gbm["sigma_annual"], 4))
@@ -761,12 +883,16 @@ with tab_sim:
 
     with st.spinner("Running Monte Carlo simulation…"):
         N_sim, K = int(N_sim), int(K)
-        if "GBM" in model:
-            terminal        = run_gbm_terminal(S0, mu, sigma, T, N_sim, seed)
-            times, paths    = run_gbm_paths(S0, mu, sigma, T, steps_per_year, K, seed + 1)
-        else:
-            terminal        = run_mean_revert_terminal(S0, kappa, theta, sigma, T, N_sim, steps_per_year, seed)
-            times, paths    = run_mean_revert_paths(S0, kappa, theta, sigma, T, steps_per_year, K, seed + 1)
+        try:
+            if "GBM" in model:
+                terminal        = run_gbm_terminal(S0, mu, sigma, T, N_sim, seed)
+                times, paths    = run_gbm_paths(S0, mu, sigma, T, steps_per_year, K, seed + 1)
+            else:
+                terminal        = run_mean_revert_terminal(S0, kappa, theta, sigma, T, N_sim, steps_per_year, seed)
+                times, paths    = run_mean_revert_paths(S0, kappa, theta, sigma, T, steps_per_year, K, seed + 1)
+        except ValueError as _sim_err:
+            st.error(f"⚠️ Simulation error: {_sim_err}")
+            st.stop()
 
     mean_p   = float(np.mean(terminal))
     median_p = float(np.median(terminal))
@@ -911,11 +1037,14 @@ with tab_weekly:
     with st.spinner("Computing week-by-week predictions…"):
         n_weeks_int = int(weekly_n_weeks)
         N_sim_int   = int(N_sim)
-
-        if "GBM" in model:
-            wdf = run_weekly_gbm(S0, mu, sigma, n_weeks_int, N_sim_int, seed + 99)
-        else:
-            wdf = run_weekly_ou(S0, kappa, theta, sigma, n_weeks_int, N_sim_int, seed + 99)
+        try:
+            if "GBM" in model:
+                wdf = run_weekly_gbm(S0, mu, sigma, n_weeks_int, N_sim_int, seed + 99)
+            else:
+                wdf = run_weekly_ou(S0, kappa, theta, sigma, n_weeks_int, N_sim_int, seed + 99)
+        except ValueError as _sim_err:
+            st.error(f"⚠️ Weekly simulation error: {_sim_err}")
+            st.stop()
 
     # ── Determine bar centre & interval ──────────────────────────────────────
     bar_col   = "median" if weekly_display == "Median (P50)" else "mean"
@@ -1126,7 +1255,6 @@ with tab_weekly:
             })
         tbl_df = pd.DataFrame(tbl_rows)
         st.dataframe(tbl_df, use_container_width=True, hide_index=True, height=400)
-        
 
         # Download button
         st.download_button(
