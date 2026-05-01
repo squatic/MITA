@@ -1,0 +1,3 @@
+[supabase]
+url = "https://mebrugjyuprltxbpepoj.supabase.co"
+key = "sb_publishable_BY65VhqgExAluVg2leDjbQ_AaErIwb4"
