@@ -1,7 +1,7 @@
 """
 Sugar Price Monte Carlo Risk Model — with integrated Parameter Estimator
 Run with: streamlit run sugar_app.py
-Requires: pip install streamlit plotly numpy scipy matplotlib pandas
+Requires: pip install streamlit plotly numpy scipy matplotlib pandas supabase
 """
 import streamlit as st
 import numpy as np
@@ -10,136 +10,484 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import matplotlib.pyplot as plt
 from scipy import stats
+import json
+import os
+from datetime import datetime
+
+# ── Supabase Client ────────────────────────────────────────────────────────────
+# Set these in .streamlit/secrets.toml:
+#   [supabase]
+#   url = "https://xxxx.supabase.co"
+#   key = "your-anon-key"
+try:
+    from supabase import create_client, Client
+    _SUPABASE_URL = st.secrets["supabase"]["url"]
+    _SUPABASE_KEY = st.secrets["supabase"]["key"]
+    supabase: Client = create_client(_SUPABASE_URL, _SUPABASE_KEY)
+    SUPABASE_OK = True
+except Exception:
+    SUPABASE_OK = False
+    supabase = None
+
+
+# ── Auth Helpers ───────────────────────────────────────────────────────────────
+
+def auth_login(email: str, password: str):
+    res = supabase.auth.sign_in_with_password({"email": email, "password": password})
+    return res
+
+def auth_signup(email: str, password: str):
+    res = supabase.auth.sign_up({"email": email, "password": password})
+    return res
+
+def auth_logout():
+    supabase.auth.sign_out()
+    st.session_state["user"] = None
+    st.session_state["access_token"] = None
+
+def get_current_user():
+    return st.session_state.get("user", None)
+
+
+# ── DB Helpers ─────────────────────────────────────────────────────────────────
+
+def save_simulation(user_id: str, params: dict, results: dict, token: str = None, refresh: str = None):
+    """Insert a simulation run record for this user."""
+    try:
+        client = supabase
+        if token and refresh:
+            try:
+                client.auth.set_session(token, refresh)
+            except Exception:
+                pass
+        client.table("simulation_runs").insert({
+            "user_id":    user_id,
+            "model":      params.get("model"),
+            "spot_price": params.get("S0"),
+            "horizon":    params.get("horizon_label"),
+            "params":     json.dumps(params),
+            "results":    json.dumps(results),
+            "created_at": datetime.utcnow().isoformat(),
+        }).execute()
+        return True
+    except Exception as e:
+        st.warning(f"Could not save simulation: {e}")
+        return False
+
+def load_simulations(user_id: str, token: str = None, refresh: str = None):
+    """Fetch all simulation runs for this user."""
+    try:
+        if token and refresh:
+            try:
+                supabase.auth.set_session(token, refresh)
+            except Exception:
+                pass
+        res = supabase.table("simulation_runs") \
+            .select("*") \
+            .eq("user_id", user_id) \
+            .order("created_at", desc=True) \
+            .execute()
+        return res.data or []
+    except Exception as e:
+        st.warning(f"Could not load simulations: {e}")
+        return []
+
+
+# ── Login / Signup Wall ────────────────────────────────────────────────────────
+
+def render_auth_page():
+    st.markdown("""
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=Outfit:wght@300;400;500;600&family=Space+Mono:wght@400;700&display=swap');
+      html, body, [class*="css"] { font-family: 'Outfit', sans-serif; background: #0a0f0d !important; }
+      .stApp { background: #0a0f0d !important; }
+      header[data-testid="stHeader"] { display: none !important; }
+      section[data-testid="stSidebar"] { display: none !important; }
+      .main .block-container { padding-top: 0 !important; max-width: 100% !important; }
+      .stTextInput input {
+        background: rgba(10,20,14,0.9) !important;
+        border: 1px solid rgba(52,120,70,0.4) !important;
+        border-radius: 10px !important;
+        color: #e8dcc8 !important;
+        font-size: 0.9rem !important;
+        transition: border-color 0.2s, box-shadow 0.2s;
+      }
+      .stTextInput input:focus {
+        border-color: rgba(212,168,67,0.7) !important;
+        box-shadow: 0 0 0 3px rgba(212,168,67,0.12) !important;
+        outline: none !important;
+      }
+      .stTextInput label { color: #6a8f72 !important; font-size: 0.75rem !important; font-weight: 500 !important; letter-spacing: 0.08em !important; text-transform: uppercase !important; }
+      .stTabs [data-baseweb="tab-list"] { background: rgba(10,20,14,0.7) !important; border-radius: 10px !important; padding: 4px !important; border: 1px solid rgba(52,120,70,0.25) !important; }
+      .stTabs [data-baseweb="tab"] { border-radius: 7px !important; color: #4a6b52 !important; font-weight: 500 !important; }
+      .stTabs [aria-selected="true"] { background: rgba(52,120,70,0.3) !important; color: #a8d4b0 !important; }
+      .stButton > button {
+        background: linear-gradient(135deg, #1e4d2a 0%, #2d7040 100%) !important;
+        color: #d4f5dc !important; font-weight: 600 !important; font-size: 0.9rem !important;
+        border: 1px solid rgba(52,180,70,0.3) !important; border-radius: 10px !important;
+        padding: 0.65rem 1.5rem !important; width: 100% !important;
+        box-shadow: 0 4px 20px rgba(34,85,47,0.35) !important; margin-top: 0.5rem !important;
+        transition: all 0.2s !important;
+      }
+      .stButton > button:hover { background: linear-gradient(135deg, #265e34 0%, #368a4e 100%) !important; transform: translateY(-1px) !important; box-shadow: 0 6px 28px rgba(34,85,47,0.5) !important; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # Hero header
+    st.markdown("""
+    <div style="
+      min-height: 30vh;
+      background: radial-gradient(ellipse 80%% 60%% at 20%% 80%%, rgba(34,85,47,0.4) 0%%, transparent 60%%),
+                  radial-gradient(ellipse 60%% 80%% at 80%% 20%%, rgba(212,168,67,0.15) 0%%, transparent 55%%),
+                  #0a0f0d;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 3rem 1rem 2rem; text-align: center;
+    ">
+      <div style="font-size:4rem; margin-bottom:1rem; filter: drop-shadow(0 0 30px rgba(52,200,80,0.5));
+           animation: none;">🎋</div>
+      <div style="font-family:'Playfair Display',serif; font-size:2.2rem; font-weight:700;
+           color:#e8dcc8; letter-spacing:-0.02em; margin-bottom:0.4rem;">
+        Sugar Price Risk Model
+      </div>
+      <div style="font-family:'Space Mono',monospace; font-size:0.72rem; color:#3a6b45;
+           letter-spacing:0.2em; text-transform:uppercase; margin-bottom:0.5rem;">
+        Monte Carlo · Ornstein–Uhlenbeck · GBM Analytics
+      </div>
+      <div style="width:60px; height:2px; background:linear-gradient(90deg,transparent,#d4a843,transparent); margin:0.5rem auto;"></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    _, col, _ = st.columns([1, 1.4, 1])
+    with col:
+        st.markdown("""
+        <div style="background:rgba(15,25,18,0.97); border:1px solid rgba(52,120,70,0.3);
+             border-radius:20px; padding:2rem 2rem 1.5rem;
+             box-shadow: 0 0 0 1px rgba(212,168,67,0.06), 0 32px 80px rgba(0,0,0,0.7),
+                         0 0 60px rgba(34,85,47,0.12);">
+        """, unsafe_allow_html=True)
+
+        tab_login, tab_signup = st.tabs(["Sign In", "Create Account"])
+
+        with tab_login:
+            email    = st.text_input("Email address", key="login_email", placeholder="you@example.com")
+            password = st.text_input("Password", type="password", key="login_pw", placeholder="••••••••")
+            if st.button("Sign In →", key="btn_login", width='stretch'):
+                if not SUPABASE_OK:
+                    st.error("Supabase is not configured. Add credentials to `.streamlit/secrets.toml`.")
+                elif not email or not password:
+                    st.warning("Please enter email and password.")
+                else:
+                    try:
+                        res = auth_login(email, password)
+                        st.session_state["user"] = res.user
+                        st.session_state["access_token"]  = res.session.access_token
+                        st.session_state["refresh_token"] = res.session.refresh_token
+                        supabase.auth.set_session(res.session.access_token, res.session.refresh_token)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Login failed: {e}")
+
+        with tab_signup:
+            email2 = st.text_input("Email address", key="signup_email", placeholder="you@example.com")
+            pw2    = st.text_input("Password", type="password", key="signup_pw", placeholder="Min. 6 characters")
+            pw3    = st.text_input("Confirm password", type="password", key="signup_pw2", placeholder="••••••••")
+            if st.button("Create Account →", key="btn_signup", width='stretch'):
+                if not SUPABASE_OK:
+                    st.error("Supabase is not configured. Add credentials to `.streamlit/secrets.toml`.")
+                elif not email2 or not pw2:
+                    st.warning("Please fill in all fields.")
+                elif pw2 != pw3:
+                    st.error("Passwords do not match.")
+                elif len(pw2) < 6:
+                    st.error("Password must be at least 6 characters.")
+                else:
+                    try:
+                        res = auth_signup(email2, pw2)
+                        st.success("✅ Account created! Check your email to confirm, then sign in.")
+                    except Exception as e:
+                        st.error(f"Sign-up failed: {e}")
+
+        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown("""
+        <div style="text-align:center; margin-top:1.2rem; font-size:0.7rem;
+             color:#2a4a32; font-family:'Space Mono',monospace; letter-spacing:0.06em;">
+          Mill-gate raw sugar · Philippines · Probabilistic estimates only
+        </div>
+        """, unsafe_allow_html=True)
+
 
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Sugar Price Risk Model",
-    page_icon="🍬",
+    page_icon="🎋",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# ── Custom CSS ─────────────────────────────────────────────────────────────────
+if "user" not in st.session_state:
+    st.session_state["user"] = None
+if "access_token" not in st.session_state:
+    st.session_state["access_token"] = None
+if "refresh_token" not in st.session_state:
+    st.session_state["refresh_token"] = None
+
+_user = get_current_user()
+if _user is None:
+    render_auth_page()
+    st.stop()
+
+# Restore supabase auth session on every rerun
+_access_token  = st.session_state.get("access_token")
+_refresh_token = st.session_state.get("refresh_token")
+if _access_token and _refresh_token and SUPABASE_OK:
+    try:
+        supabase.auth.set_session(_access_token, _refresh_token)
+    except Exception:
+        pass
+
+# ── Main App CSS ───────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;600&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Outfit:wght@300;400;500;600&family=Space+Mono:wght@400;700&display=swap');
 
-  html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
-  h1, h2, h3 { font-family: 'DM Serif Display', serif; }
+  html, body, [class*="css"] {
+    font-family: 'Outfit', sans-serif;
+    background: #080e0b !important;
+    color: #d4c9b4;
+  }
+  .stApp { background: #080e0b !important; }
+  .main .block-container {
+    padding-top: 1.5rem;
+    background: #080e0b;
+  }
 
-  /* Sidebar */
+  /* ── Sidebar ── */
   section[data-testid="stSidebar"] {
-    background: #0f1923;
-    color: #e8dcc8;
+    background: linear-gradient(180deg, #0a1410 0%, #080e0b 100%);
+    border-right: 1px solid rgba(52,120,70,0.2);
   }
   section[data-testid="stSidebar"] label,
   section[data-testid="stSidebar"] .stSelectbox label,
   section[data-testid="stSidebar"] p:not(button p) {
-    color: #c9bfac !important;
-    font-size: 0.82rem;
+    color: #6a8f72 !important;
+    font-size: 0.75rem;
     font-weight: 500;
-    letter-spacing: 0.03em;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    font-family: 'Space Mono', monospace !important;
   }
   section[data-testid="stSidebar"] .stSlider > div > div > div { background: #d4a843; }
-
-  /* Metric cards */
-  div[data-testid="metric-container"] {
-    background: #0f1923;
-    border: 1px solid #1e2d3d;
-    border-radius: 12px;
-    padding: 1rem 1.2rem;
-    color: #e8dcc8;
+  section[data-testid="stSidebar"] input {
+    background: rgba(10,20,14,0.8) !important;
+    border: 1px solid rgba(52,120,70,0.3) !important;
+    color: #d4c9b4 !important;
+    border-radius: 8px !important;
   }
-  div[data-testid="metric-container"] label { color: #8a9ab0 !important; font-size: 0.75rem; letter-spacing: 0.06em; text-transform: uppercase; }
-  div[data-testid="metric-container"] div[data-testid="stMetricValue"] { color: #e8dcc8; font-size: 1.6rem; font-weight: 600; }
-  div[data-testid="metric-container"] div[data-testid="stMetricDelta"] { font-size: 0.8rem; }
 
-  /* Main area */
-  .main .block-container { padding-top: 1.5rem; }
+  /* ── Metric cards ── */
+  div[data-testid="metric-container"] {
+    background: rgba(12,22,16,0.9);
+    border: 1px solid rgba(52,120,70,0.25);
+    border-radius: 14px;
+    padding: 1rem 1.2rem;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.4), inset 0 1px 0 rgba(212,168,67,0.06);
+    transition: border-color 0.2s;
+  }
+  div[data-testid="metric-container"]:hover { border-color: rgba(212,168,67,0.3); }
+  div[data-testid="metric-container"] label {
+    color: #4a6b52 !important;
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    font-family: 'Space Mono', monospace;
+  }
+  div[data-testid="metric-container"] div[data-testid="stMetricValue"] {
+    color: #e8dcc8;
+    font-size: 1.55rem;
+    font-weight: 600;
+    font-family: 'Playfair Display', serif;
+  }
+  div[data-testid="metric-container"] div[data-testid="stMetricDelta"] { font-size: 0.78rem; }
+
+  /* ── Section headers ── */
   .section-header {
-    font-family: 'DM Serif Display', serif;
-    font-size: 1.1rem;
-    color: #4a7fa5;
-    border-bottom: 1px solid #1e2d3d;
-    padding-bottom: 0.3rem;
-    margin: 1.5rem 0 1rem 0;
+    font-family: 'Playfair Display', serif;
+    font-size: 1.05rem;
+    font-style: italic;
+    color: #6aab7a;
+    border-bottom: 1px solid rgba(52,120,70,0.25);
+    padding-bottom: 0.4rem;
+    margin: 1.8rem 0 1.1rem 0;
+    letter-spacing: 0.01em;
   }
   .est-section-header {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 12px;
-    color: #6b7280;
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    color: #3a6b45;
     text-transform: uppercase;
-    letter-spacing: 0.12em;
-    border-bottom: 1px solid #2e3347;
+    letter-spacing: 0.15em;
+    border-bottom: 1px solid rgba(52,120,70,0.2);
     padding-bottom: 8px;
     margin-bottom: 16px;
   }
+
+  /* ── Pills ── */
   .info-pill {
     display: inline-block;
-    background: #1e2d3d;
-    color: #a8c4d8;
+    background: rgba(12,30,18,0.9);
+    color: #7aab86;
+    border: 1px solid rgba(52,120,70,0.3);
     border-radius: 20px;
-    padding: 2px 12px;
-    font-size: 0.75rem;
+    padding: 3px 14px;
+    font-size: 0.72rem;
     font-weight: 500;
     margin: 2px 3px;
+    font-family: 'Space Mono', monospace;
+    letter-spacing: 0.05em;
   }
   .applied-pill {
     display: inline-block;
-    background: #122d1e;
+    background: rgba(18,45,30,0.9);
     color: #52c87a;
+    border: 1px solid rgba(52,200,80,0.3);
     border-radius: 20px;
-    padding: 2px 12px;
-    font-size: 0.75rem;
+    padding: 3px 14px;
+    font-size: 0.72rem;
     font-weight: 500;
     margin: 2px 3px;
   }
-  .alert-danger { background: #2d1a1a; border-left: 3px solid #e05252; padding: 0.6rem 1rem; border-radius: 6px; font-size: 0.85rem; color: #f5a0a0; }
-  .alert-safe   { background: #122d1e; border-left: 3px solid #52c87a; padding: 0.6rem 1rem; border-radius: 6px; font-size: 0.85rem; color: #8de8a8; }
+
+  /* ── Alerts ── */
+  .alert-danger {
+    background: rgba(45,26,26,0.8);
+    border-left: 3px solid #e05252;
+    border-radius: 8px;
+    padding: 0.65rem 1rem;
+    font-size: 0.85rem;
+    color: #f5a0a0;
+    backdrop-filter: blur(4px);
+  }
+  .alert-safe {
+    background: rgba(18,45,30,0.8);
+    border-left: 3px solid #52c87a;
+    border-radius: 8px;
+    padding: 0.65rem 1rem;
+    font-size: 0.85rem;
+    color: #8de8a8;
+    backdrop-filter: blur(4px);
+  }
   .info-box {
-    background: #0f1923;
+    background: rgba(12,22,30,0.9);
     border-left: 3px solid #3b82f6;
-    border-radius: 4px;
+    border-radius: 6px;
     padding: 12px 16px;
     font-size: 13px;
-    color: #9ca3af;
+    color: #7a9aaf;
     margin-bottom: 16px;
   }
   .warn-box {
-    background: #0f1923;
+    background: rgba(25,18,8,0.9);
     border-left: 3px solid #f59e0b;
-    border-radius: 4px;
+    border-radius: 6px;
     padding: 12px 16px;
     font-size: 13px;
-    color: #9ca3af;
+    color: #c4935a;
     margin-bottom: 16px;
   }
+
+  /* ── Buttons ── */
   .stButton > button {
-    background: #FFF600;
-    color: #0f1923 !important;
-    font-weight: 700;
-    border: none;
-    border-radius: 8px;
-    font-size: 0.95rem;
-    padding: 0.55rem 1.8rem;
+    background: linear-gradient(135deg, #1a4226 0%, #256336 100%);
+    color: #c8f0d0 !important;
+    font-weight: 600;
+    border: 1px solid rgba(52,160,70,0.35);
+    border-radius: 10px;
+    font-size: 0.88rem;
+    padding: 0.55rem 1.5rem;
     letter-spacing: 0.04em;
     width: 100%;
+    transition: all 0.2s;
+    box-shadow: 0 3px 16px rgba(34,85,47,0.3);
   }
-  .stButton > button:hover { background: #F7DC6F; color: #0f1923 !important; }
-  section[data-testid="stSidebar"] .stButton > button { color: #4A4747 !important; }
-  section[data-testid="stSidebar"] .stButton > button p { color: #4A4747 !important; }
-  section[data-testid="stSidebar"] .stButton > button:hover { color: #4A4747 !important; }
+  .stButton > button:hover {
+    background: linear-gradient(135deg, #205230 0%, #2e7a41 100%);
+    box-shadow: 0 5px 24px rgba(34,85,47,0.45);
+    transform: translateY(-1px);
+    color: #d8f8e0 !important;
+  }
+  /* Run simulation button — gold accent */
+  section[data-testid="stSidebar"] .stButton:last-of-type > button {
+    background: linear-gradient(135deg, #6b4800 0%, #a06c00 100%) !important;
+    color: #fff3cc !important;
+    border: 1px solid rgba(212,168,67,0.4) !important;
+    box-shadow: 0 3px 16px rgba(160,108,0,0.35) !important;
+  }
+  section[data-testid="stSidebar"] .stButton:last-of-type > button:hover {
+    background: linear-gradient(135deg, #7d5500 0%, #b87c00 100%) !important;
+    box-shadow: 0 5px 24px rgba(160,108,0,0.5) !important;
+  }
   .apply-btn > button {
-    background: #4A4747 !important;
+    background: rgba(18,45,30,0.9) !important;
     color: #52c87a !important;
-    border: 1px solid #52c87a !important;
+    border: 1px solid rgba(52,200,80,0.35) !important;
   }
-  .apply-btn > button:hover { background: #255c37 !important; }
+  .apply-btn > button:hover { background: rgba(25,60,38,0.9) !important; }
+
+  /* ── Tabs ── */
+  .stTabs [data-baseweb="tab-list"] {
+    background: rgba(10,20,14,0.6);
+    border-radius: 10px;
+    padding: 4px;
+    border: 1px solid rgba(52,120,70,0.2);
+    gap: 2px;
+  }
+  .stTabs [data-baseweb="tab"] {
+    border-radius: 7px;
+    color: #3a6b45;
+    font-weight: 500;
+    font-size: 0.85rem;
+    letter-spacing: 0.02em;
+  }
+  .stTabs [aria-selected="true"] {
+    background: rgba(52,120,70,0.25) !important;
+    color: #8fd4a0 !important;
+  }
+
+  /* ── Inputs in main area ── */
+  .stTextInput input, .stNumberInput input, .stSelectbox select {
+    background: rgba(10,20,14,0.8) !important;
+    border: 1px solid rgba(52,120,70,0.3) !important;
+    color: #d4c9b4 !important;
+    border-radius: 8px !important;
+  }
+  .stTextInput input:focus, .stNumberInput input:focus {
+    border-color: rgba(212,168,67,0.5) !important;
+    box-shadow: 0 0 0 2px rgba(212,168,67,0.1) !important;
+  }
+
+  /* ── Page title ── */
+  .page-title {
+    font-family: 'Playfair Display', serif;
+    font-size: 2rem;
+    font-weight: 700;
+    color: #e8dcc8;
+    letter-spacing: -0.02em;
+    margin-bottom: 0.1rem;
+  }
+  .page-subtitle {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.7rem;
+    color: #3a6b45;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-bottom: 1rem;
+  }
+
+  /* ── Dataframe ── */
+  .stDataFrame { border-radius: 10px; overflow: hidden; }
 </style>
 """, unsafe_allow_html=True)
 
-
-# ── Parameter Estimation Helpers ───────────────────────────────────────────────
 
 def annualization_factor(freq: str) -> int:
     return {"Daily": 252, "Weekly": 52, "Monthly": 12, "Yearly": 1}[freq]
@@ -309,7 +657,23 @@ for _k, _v in _defaults.items():
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("##  🍬 Sugar Price\nMonte Carlo Risk Model")
+    st.markdown("""
+    <div style="font-family:'Playfair Display',serif; font-size:1.3rem; font-weight:700;
+         color:#e8dcc8; margin-bottom:0.2rem; line-height:1.2;">
+      🎋 Sugar Price<br><span style="font-size:0.9rem;color:#4a6b52;font-family:'Space Mono',monospace;
+      font-style:normal;font-weight:400;letter-spacing:0.05em;">Risk Model</span>
+    </div>
+    """, unsafe_allow_html=True)
+    # ── User info & logout ────────────────────────────────────────────────────
+    st.markdown(
+        f'<div style="font-size:11px;color:#6b7280;font-family:\'IBM Plex Mono\',monospace;'
+        f'margin-bottom:4px">Signed in as<br>'
+        f'<span style="color:#d4a843">{_user.email}</span></div>',
+        unsafe_allow_html=True
+    )
+    if st.button("🚪 Sign Out", width='stretch'):
+        auth_logout()
+        st.rerun()
     st.markdown("---")
     # ── Model Setup ──────────────────────────────────────────────────────────
     st.markdown("### Model Setup")
@@ -414,7 +778,7 @@ with st.sidebar:
                     apply_label = "✅ Apply OU Parameters"
 
                 st.markdown("")
-                if st.button(apply_label, use_container_width=True):
+                if st.button(apply_label, width='stretch'):
                     if "GBM" in model:
                         st.session_state["param_mu"]    = float(round(gbm_est["mu_ito"], 4))
                         st.session_state["param_sigma"] = float(round(gbm_est["sigma_annual"], 4))
@@ -439,7 +803,7 @@ with st.sidebar:
             f'<span class="applied-pill">✔ Parameters loaded from {st.session_state["applied_from"]} estimation</span>',
             unsafe_allow_html=True
         )
-        if st.button("↩ Reset to defaults", use_container_width=False):
+        if st.button("↩ Reset to defaults", width='content'):
             for _k, _v in _defaults.items():
                 st.session_state[_k] = _v
             st.rerun()
@@ -507,11 +871,14 @@ with st.sidebar:
         help="Error bars around the weekly bar."
     )
 
-    run   = st.button("▶  Run Simulation", use_container_width=True)
+    run   = st.button("▶  Run Simulation", width='stretch')
 
 
 # ── Title ──────────────────────────────────────────────────────────────────────
-st.title("Sugar Price Monte Carlo Risk Model")
+st.markdown('''
+<div class="page-title">🎋 Sugar Price Risk Model</div>
+<div class="page-subtitle">Monte Carlo · GBM · Ornstein–Uhlenbeck · Philippines Mill-gate</div>
+''', unsafe_allow_html=True)
 col_model, col_spot, col_horizon = st.columns(3)
 with col_model:
     st.markdown(f'<span class="info-pill">Model: {model}</span>', unsafe_allow_html=True)
@@ -531,10 +898,11 @@ RED_CLR  = "#e05252"
 GREEN_OK = "#52c87a"
 AMBER    = "#f59e0b"
 
-tab_est, tab_sim, tab_weekly = st.tabs([
+tab_est, tab_sim, tab_weekly, tab_saved = st.tabs([
     "📊 Parameter Estimator",
     "🎲 Monte Carlo Simulation",
     "📅 Weekly Price Prediction",
+    "💾 Saved Runs",
 ])
 
 
@@ -553,7 +921,7 @@ with tab_est:
                     '<b>OU mean reversion parameters (κ, θ)</b> — then apply them directly to the simulation.</div>',
                     unsafe_allow_html=True)
         st.markdown("#### Expected CSV format")
-        st.dataframe(sample, use_container_width=True)
+        st.dataframe(sample, width='stretch')
     else:
         prices_est = df_raw[price_col].dropna().values
 
@@ -590,7 +958,7 @@ with tab_est:
 
         with col_prev:
             st.markdown(f"**{len(prices_est)} observations** · {est_freq} · `{price_col}`")
-            st.dataframe(df_raw[[price_col]].head(10), use_container_width=True)
+            st.dataframe(df_raw[[price_col]].head(10), width='stretch')
 
         with col_chart:
             fig_px, ax_px = plt.subplots(figsize=(7, 3))
@@ -724,7 +1092,7 @@ with tab_est:
                 "OU simulation", "Interpretation", "Interpretation",
             ]
         })
-        st.dataframe(summary, use_container_width=True, hide_index=True)
+        st.dataframe(summary, width='stretch', hide_index=True)
 
         dl_col, apply_col = st.columns(2)
         with dl_col:
@@ -733,11 +1101,11 @@ with tab_est:
                 data=summary.to_csv(index=False),
                 file_name="sugar_model_parameters.csv",
                 mime="text/csv",
-                use_container_width=True
+                width='stretch'
             )
         with apply_col:
             apply_target = "GBM" if "GBM" in model else "OU"
-            if st.button(f"✅ Apply {apply_target} Parameters to Simulation →", use_container_width=True):
+            if st.button(f"✅ Apply {apply_target} Parameters to Simulation →", width='stretch'):
                 if "GBM" in model:
                     st.session_state["param_mu"]    = float(round(gbm["mu_ito"], 4))
                     st.session_state["param_sigma"] = float(round(gbm["sigma_annual"], 4))
@@ -757,31 +1125,65 @@ with tab_est:
 with tab_sim:
     if not run:
         st.info("👈  Configure the sidebar and click **Run Simulation** to generate results.", icon="💡")
-        st.stop()
+    else:
+        with st.spinner("Running Monte Carlo simulation…"):
+            N_sim, K = int(N_sim), int(K)
+            if "GBM" in model:
+                terminal        = run_gbm_terminal(S0, mu, sigma, T, N_sim, seed)
+                times, paths    = run_gbm_paths(S0, mu, sigma, T, steps_per_year, K, seed + 1)
+            else:
+                terminal        = run_mean_revert_terminal(S0, kappa, theta, sigma, T, N_sim, steps_per_year, seed)
+                times, paths    = run_mean_revert_paths(S0, kappa, theta, sigma, T, steps_per_year, K, seed + 1)
 
-    with st.spinner("Running Monte Carlo simulation…"):
-        N_sim, K = int(N_sim), int(K)
-        if "GBM" in model:
-            terminal        = run_gbm_terminal(S0, mu, sigma, T, N_sim, seed)
-            times, paths    = run_gbm_paths(S0, mu, sigma, T, steps_per_year, K, seed + 1)
-        else:
-            terminal        = run_mean_revert_terminal(S0, kappa, theta, sigma, T, N_sim, steps_per_year, seed)
-            times, paths    = run_mean_revert_paths(S0, kappa, theta, sigma, T, steps_per_year, K, seed + 1)
+        # ── Store results in session state for Save button ────────────────────
+        mean_p   = float(np.mean(terminal))
+        median_p = float(np.median(terminal))
+        std_p    = float(np.std(terminal))
+        p05_v    = float(np.percentile(terminal, 5))
+        p25_v    = float(np.percentile(terminal, 25))
+        p75_v    = float(np.percentile(terminal, 75))
+        p95_v    = float(np.percentile(terminal, 95))
+        var95_v  = S0 - p05_v
+        es_vals  = terminal[terminal <= p05_v]
+        es95_v   = float(np.mean(es_vals)) if len(es_vals) > 0 else p05_v
+        prob_be_v = float(np.mean(terminal <= breakeven))
+        st.session_state["last_sim_results"] = {
+            "mean_p": mean_p, "median_p": median_p, "std_p": std_p,
+            "p05": p05_v, "p25": p25_v, "p75": p75_v, "p95": p95_v,
+            "var95": var95_v, "es95": es95_v, "prob_be": prob_be_v,
+        }
+        st.session_state["last_sim_params"] = {
+            "model": model, "S0": S0, "horizon_label": horizon_label,
+            "T": T, "N_sim": int(N_sim), "seed": int(seed),
+            "breakeven": breakeven, "volume": volume,
+            **({"mu": mu, "sigma": sigma} if "GBM" in model else
+               {"kappa": kappa, "theta": theta, "sigma": sigma}),
+        }
+        st.session_state["last_sim_terminal"] = terminal
+        st.session_state["last_sim_times"]    = times
+        st.session_state["last_sim_paths"]    = paths
+        st.session_state["sim_ran"] = True
 
-    mean_p   = float(np.mean(terminal))
-    median_p = float(np.median(terminal))
-    std_p    = float(np.std(terminal))
-    p05      = float(np.percentile(terminal, 5))
-    p25      = float(np.percentile(terminal, 25))
-    p75      = float(np.percentile(terminal, 75))
-    p95      = float(np.percentile(terminal, 95))
-    var95    = S0 - p05
-    es_vals  = terminal[terminal <= p05]
-    es95     = float(np.mean(es_vals)) if len(es_vals) > 0 else p05
-    prob_be  = float(np.mean(terminal <= breakeven))
-    rev_risk = var95 * volume if volume > 0 else None
+    if st.session_state.get("sim_ran"):
+        terminal = st.session_state["last_sim_terminal"]
+        times    = st.session_state["last_sim_times"]
+        paths    = st.session_state["last_sim_paths"]
+        _r       = st.session_state["last_sim_results"]
+        mean_p   = _r["mean_p"]
+        median_p = _r["median_p"]
+        std_p    = _r["std_p"]
+        p05      = _r["p05"]
+        p25      = _r["p25"]
+        p75      = _r["p75"]
+        p95      = _r["p95"]
+        var95    = _r["var95"]
+        es95     = _r["es95"]
+        prob_be  = _r["prob_be"]
+        rev_risk = var95 * volume if volume > 0 else None
 
     # ── KPI row ───────────────────────────────────────────────────────────────
+    if not st.session_state.get("sim_ran"):
+        st.stop()
     st.markdown('<div class="section-header">Key Statistics at Horizon</div>', unsafe_allow_html=True)
     k1, k2, k3, k4, k5 = st.columns(5)
     k1.metric("Mean Price",              f"₱{mean_p:,.0f}",  f"{(mean_p/S0-1)*100:+.1f}% vs spot")
@@ -800,6 +1202,26 @@ with tab_sim:
 
     if rev_risk is not None:
         st.markdown(f'<div class="alert-danger" style="margin-top:6px">Revenue at Risk (VaR × Volume): <b>₱{rev_risk:,.0f}</b></div>', unsafe_allow_html=True)
+
+    # ── Save to database ──────────────────────────────────────────────────────
+    st.markdown("")
+    save_col, _ = st.columns([1, 3])
+    with save_col:
+        if st.button("💾 Save This Run", width='stretch'):
+            if not SUPABASE_OK:
+                st.warning("Supabase not configured — cannot save.")
+            elif not st.session_state.get("sim_ran"):
+                st.warning("Run a simulation first before saving.")
+            else:
+                ok = save_simulation(
+                    _user.id,
+                    st.session_state["last_sim_params"],
+                    st.session_state["last_sim_results"],
+                    token=st.session_state.get("access_token"),
+                    refresh=st.session_state.get("refresh_token"),
+                )
+                if ok:
+                    st.success("✅ Simulation saved! View it in the 💾 Saved Runs tab.")
 
     # ── Charts ────────────────────────────────────────────────────────────────
     st.markdown('<div class="section-header">Price Distribution at Horizon</div>', unsafe_allow_html=True)
@@ -833,7 +1255,7 @@ with tab_sim:
             legend=dict(bgcolor=DARK_BG, bordercolor=GRID_CLR, borderwidth=1),
             margin=dict(t=30, b=50, l=50, r=30), height=420, barmode="overlay",
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("P05 (worst 5%)",  f"₱{p05:,.0f}",  f"{(p05/S0-1)*100:+.1f}% vs spot")
         c2.metric("P25",             f"₱{p25:,.0f}",  f"{(p25/S0-1)*100:+.1f}% vs spot")
@@ -880,7 +1302,7 @@ with tab_sim:
             legend=dict(bgcolor=DARK_BG, bordercolor=GRID_CLR, borderwidth=1),
             margin=dict(t=30, b=50, l=50, r=30), height=430,
         )
-        st.plotly_chart(fig2, use_container_width=True)
+        st.plotly_chart(fig2, width='stretch')
         st.caption(f"Showing {display_k} sample paths with P05–P95 and P25–P75 confidence bands.")
 
     # Percentile table
@@ -896,7 +1318,7 @@ with tab_sim:
                 "Change vs Spot": f"{chg:+.1f}%",
                 "Below Break-even?": "❌ Yes" if v <= breakeven else "✅ No",
             })
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True, height=520)
+        st.dataframe(pd.DataFrame(rows), width='stretch', hide_index=True, height=520)
         st.caption(f"Spot: ₱{S0:,.0f}/Lkg | Break-even: ₱{breakeven:,.0f}/Lkg | Model: {model}")
 
 
@@ -904,18 +1326,17 @@ with tab_sim:
 # TAB 3 — Weekly Price Prediction
 # ════════════════════════════════════════════════════════════════════════════════
 with tab_weekly:
-    if not run:
+    if not run and not st.session_state.get("sim_ran"):
         st.info("👈  Configure the sidebar and click **Run Simulation** to generate the weekly prediction chart.", icon="💡")
-        st.stop()
+    else:
+        with st.spinner("Computing week-by-week predictions…"):
+            n_weeks_int = int(weekly_n_weeks)
+            N_sim_int   = int(N_sim)
 
-    with st.spinner("Computing week-by-week predictions…"):
-        n_weeks_int = int(weekly_n_weeks)
-        N_sim_int   = int(N_sim)
-
-        if "GBM" in model:
-            wdf = run_weekly_gbm(S0, mu, sigma, n_weeks_int, N_sim_int, seed + 99)
-        else:
-            wdf = run_weekly_ou(S0, kappa, theta, sigma, n_weeks_int, N_sim_int, seed + 99)
+            if "GBM" in model:
+                wdf = run_weekly_gbm(S0, mu, sigma, n_weeks_int, N_sim_int, seed + 99)
+            else:
+                wdf = run_weekly_ou(S0, kappa, theta, sigma, n_weeks_int, N_sim_int, seed + 99)
 
     # ── Determine bar centre & interval ──────────────────────────────────────
     bar_col   = "median" if weekly_display == "Median (P50)" else "mean"
@@ -1087,7 +1508,7 @@ with tab_weekly:
         ),
     )
 
-    st.plotly_chart(fig_w, use_container_width=True)
+    st.plotly_chart(fig_w, width='stretch')
 
     # ── Trend annotation ──────────────────────────────────────────────────────
     trend_pct = (bar_vals[-1] / S0 - 1) * 100
@@ -1125,7 +1546,7 @@ with tab_weekly:
                 "Break-even Risk": risk_flag,
             })
         tbl_df = pd.DataFrame(tbl_rows)
-        st.dataframe(tbl_df, use_container_width=True, hide_index=True, height=400)
+        st.dataframe(tbl_df, width='stretch', hide_index=True, height=400)
         
 
         # Download button
@@ -1134,8 +1555,77 @@ with tab_weekly:
             data=tbl_df.to_csv(index=False),
             file_name="sugar_weekly_forecast.csv",
             mime="text/csv",
-            use_container_width=False,
+            width='content',
         )
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# TAB 4 — Saved Runs
+# ════════════════════════════════════════════════════════════════════════════════
+with tab_saved:
+    st.markdown('<div class="section-header">Your Saved Simulation Runs</div>', unsafe_allow_html=True)
+
+    if not SUPABASE_OK:
+        st.warning("Supabase is not configured. Add your credentials to `.streamlit/secrets.toml` to enable saving.")
+    else:
+        if st.button("🔄 Refresh", key="refresh_saved"):
+            st.rerun()
+
+        runs = load_simulations(
+            _user.id,
+            token=st.session_state.get("access_token"),
+            refresh=st.session_state.get("refresh_token"),
+        )
+
+        if not runs:
+            st.info("No saved runs yet. Run a simulation and click **💾 Save This Run** to save it here.")
+        else:
+            st.caption(f"{len(runs)} saved run{'s' if len(runs) != 1 else ''} for {_user.email}")
+
+            for i, run in enumerate(runs):
+                p = json.loads(run.get("params", "{}"))
+                r = json.loads(run.get("results", "{}"))
+                created = run.get("created_at", "")[:19].replace("T", " ")
+
+                with st.expander(
+                    f"🕒 {created}  ·  {run.get('model','?')}  ·  "
+                    f"Spot ₱{run.get('spot_price',0):,.0f}  ·  Horizon {run.get('horizon','?')}",
+                    expanded=(i == 0),
+                ):
+                    rc1, rc2, rc3, rc4 = st.columns(4)
+                    rc1.metric("Mean Price",   f"₱{r.get('mean_p',0):,.0f}")
+                    rc2.metric("Median Price", f"₱{r.get('median_p',0):,.0f}")
+                    rc3.metric("VaR 95%",      f"₱{r.get('var95',0):,.0f}")
+                    rc4.metric("P(≤ Break-even)", f"{r.get('prob_be',0)*100:.1f}%")
+
+                    st.markdown(
+                        f"**Model:** {p.get('model','?')}  |  "
+                        f"**Simulations:** {p.get('N_sim', '?'):,}  |  "
+                        f"**Break-even:** ₱{p.get('breakeven', 0):,.0f}/Lkg  |  "
+                        f"**Seed:** {p.get('seed','?')}"
+                    )
+
+                    # Parameters detail
+                    if "GBM" in str(p.get("model", "")):
+                        st.markdown(
+                            f"μ = `{p.get('mu', '?')}` · σ = `{p.get('sigma', '?')}`"
+                        )
+                    else:
+                        st.markdown(
+                            f"κ = `{p.get('kappa','?')}` · θ = `₱{p.get('theta',0):,.0f}` · σ = `{p.get('sigma','?')}`"
+                        )
+
+                    pct_tbl = pd.DataFrame({
+                        "Metric": ["P05", "P25", "Median", "Mean", "P75", "P95", "ES95"],
+                        "Price (₱)": [
+                            f"₱{r.get('p05',0):,.0f}", f"₱{r.get('p25',0):,.0f}",
+                            f"₱{r.get('median_p',0):,.0f}", f"₱{r.get('mean_p',0):,.0f}",
+                            f"₱{r.get('p75',0):,.0f}", f"₱{r.get('p95',0):,.0f}",
+                            f"₱{r.get('es95',0):,.0f}",
+                        ]
+                    })
+                    st.dataframe(pct_tbl, width='stretch', hide_index=True)
+
 
 # ── Footer ─────────────────────────────────────────────────────────────────────
 st.markdown("---")
