@@ -148,7 +148,7 @@ def render_auth_page():
            color:#e8dcc8; letter-spacing:-0.02em; margin-bottom:0.4rem;">
         Sugar Price Risk Model
       </div>
-      <div style="font-family:'Space Mono',monospace; font-size:0.72rem; color:#3a6b45;
+      <div style="font-family:'Space Mono',monospace; font-size:0.72rem; color:#ccfa34;
            letter-spacing:0.2em; text-transform:uppercase; margin-bottom:0.5rem;">
         Monte Carlo · Ornstein–Uhlenbeck · GBM Analytics
       </div>
