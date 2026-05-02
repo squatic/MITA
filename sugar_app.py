@@ -699,8 +699,8 @@ for _k, _v in _defaults.items():
 with st.sidebar:
     st.markdown("""
     <div style="font-family:'Playfair Display',serif; font-size:1.3rem; font-weight:700;
-         color:#e8dcc8; margin-bottom:0.2rem; line-height:1.2;">
-      🎋 Sugar Price<br><span style="font-size:0.9rem;color:#4a6b52;font-family:'Space Mono',monospace;
+         color:#ccfa34; margin-bottom:0.2rem; line-height:1.2;">
+      🎋 Sugar Price<br><span style="font-size:0.9rem;color:#ccfa34;font-family:'Space Mono',monospace;
       font-style:normal;font-weight:400;letter-spacing:0.05em;">Risk Model</span>
     </div>
     """, unsafe_allow_html=True)
@@ -758,7 +758,7 @@ with st.sidebar:
 
     st.markdown("### 📁 Historical Data (optional)")
     st.markdown(
-        '<div style="font-size:11px;color:#6b7280;font-family:\'IBM Plex Mono\',monospace;margin-bottom:8px">'
+        '<div style="font-size:11px;color:#ccfa34;font-family:\'IBM Plex Mono\',monospace;margin-bottom:8px">'
         'Upload a price CSV to auto-estimate model parameters.</div>',
         unsafe_allow_html=True
     )
@@ -992,7 +992,7 @@ with st.sidebar:
 # ── Title ──────────────────────────────────────────────────────────────────────
 st.markdown('''
 <div class="page-title">🎋 Sugar Price Risk Model</div>
-<div class="page-subtitle">Monte Carlo · GBM · Ornstein–Uhlenbeck · Philippines Mill-gate</div>
+<div class="page-subtitle">Monte Carlo · Philippines Mill-gate</div>
 ''', unsafe_allow_html=True)
 col_model, col_spot, col_horizon = st.columns(3)
 with col_model:
