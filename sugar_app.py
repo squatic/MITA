@@ -38,7 +38,6 @@ def auth_signup(email: str, password: str):
 
 def auth_logout():
     supabase.auth.sign_out()
-    # FIX AUTH-08: clear ALL token keys on logout
     st.session_state["user"]          = None
     st.session_state["access_token"]  = None
     st.session_state["refresh_token"] = None
@@ -50,20 +49,18 @@ def get_current_user():
 # ── DB Helpers ─────────────────────────────────────────────────────────────────
 
 def _try_set_session(client, token, refresh):
-    """FIX AUTH-07: warn instead of silently swallowing stale session errors."""
+    """Warn instead of silently swallowing stale session errors."""
     if not (token and refresh):
         return
     try:
         client.auth.set_session(token, refresh)
     except Exception as e:
-        st.warning(f"Session refresh failed — you may need to sign in again. ({e})")
-        # Force logout so the user isn't left in a zombie state
+        st.warning(f"Session expired — please sign in again. ({e})")
         auth_logout()
         st.rerun()
 
 
 def save_simulation(user_id: str, params: dict, results: dict, token: str = None, refresh: str = None):
-    """Insert a simulation run record for this user."""
     try:
         client = supabase
         _try_set_session(client, token, refresh)
@@ -81,14 +78,15 @@ def save_simulation(user_id: str, params: dict, results: dict, token: str = None
         st.warning(f"Could not save simulation: {e}")
         return False
 
+# FIX DB-LIMIT: cap fetched rows to 50 to prevent timeouts on large history
 def load_simulations(user_id: str, token: str = None, refresh: str = None):
-    """Fetch all simulation runs for this user."""
     try:
         _try_set_session(supabase, token, refresh)
         res = supabase.table("simulation_runs") \
             .select("*") \
             .eq("user_id", user_id) \
             .order("created_at", desc=True) \
+            .limit(50) \
             .execute()
         return res.data or []
     except Exception as e:
@@ -206,7 +204,12 @@ def render_auth_page():
                         res = auth_signup(email2, pw2)
                         st.success("✅ Account created! Check your email to confirm, then sign in.")
                     except Exception as e:
-                        st.error(f"Sign-up failed: {e}")
+                        # FIX AUTH-SIGNUP: friendly message for duplicate email
+                        msg = str(e)
+                        if "already registered" in msg.lower() or "already exists" in msg.lower():
+                            st.error("An account with this email already exists. Please sign in instead.")
+                        else:
+                            st.error(f"Sign-up failed: {e}")
 
         st.markdown("</div>", unsafe_allow_html=True)
         st.markdown("""
@@ -237,7 +240,6 @@ if _user is None:
     render_auth_page()
     st.stop()
 
-# Restore supabase auth session on every rerun — FIX AUTH-07: use helper
 _access_token  = st.session_state.get("access_token")
 _refresh_token = st.session_state.get("refresh_token")
 if _access_token and _refresh_token and SUPABASE_OK:
@@ -480,6 +482,30 @@ def dt_value(freq: str) -> float:
     return {"Daily": 1/252, "Weekly": 1/52, "Monthly": 1/12, "Yearly": 1.0}[freq]
 
 
+# FIX CSV-CLEAN: strip non-positive prices and sort by date before estimation
+def clean_price_series(prices: np.ndarray, dates=None):
+    """
+    Returns (clean_prices, clean_dates, n_dropped) after:
+      - Removing NaNs
+      - Removing zero and negative values (log() is undefined for these)
+      - Sorting by date if dates are provided
+    """
+    mask = np.isfinite(prices) & (prices > 0)
+    n_dropped = int(np.sum(~mask))
+    clean_prices = prices[mask]
+    clean_dates  = dates[mask] if dates is not None else None
+
+    if clean_dates is not None:
+        try:
+            order = np.argsort(clean_dates)
+            clean_prices = clean_prices[order]
+            clean_dates  = clean_dates[order]
+        except Exception:
+            pass  # if dates are not sortable, leave as-is
+
+    return clean_prices, clean_dates, n_dropped
+
+
 def compute_gbm_params(prices: np.ndarray, freq: str) -> dict:
     N            = annualization_factor(freq)
     log_returns  = np.diff(np.log(prices))
@@ -501,9 +527,8 @@ def compute_gbm_params(prices: np.ndarray, freq: str) -> dict:
 
 def compute_ou_params(prices: np.ndarray, freq: str) -> dict:
     """
-    FIX EST-09: guard against zero-variance (constant) price series.
+    Guard against zero-variance (constant) price series.
     A constant series has beta == 0, causing ZeroDivisionError on theta = exp(-alpha/beta).
-    We now detect this early and return a safe sentinel dict.
     """
     dt         = dt_value(freq)
     N          = annualization_factor(freq)
@@ -511,7 +536,6 @@ def compute_ou_params(prices: np.ndarray, freq: str) -> dict:
     d_logP     = np.diff(log_prices)
     logP_lag   = log_prices[:-1]
 
-    # Guard: if there is no variance in the lagged prices, OLS is undefined
     if np.std(logP_lag) < 1e-12 or np.std(d_logP) < 1e-12:
         return {
             "k":                 np.nan,
@@ -533,7 +557,6 @@ def compute_ou_params(prices: np.ndarray, freq: str) -> dict:
     beta      = slope
     alpha     = intercept
 
-    # Guard: beta == 0 means no reversion signal; avoid division by zero
     if abs(beta) < 1e-12:
         k     = 0.0
         theta = float(np.exp(np.mean(log_prices)))
@@ -663,15 +686,13 @@ _defaults = {
     "param_kappa":    0.60,
     "param_theta":    2400.0,
     "params_applied": False,
-    "applied_from":   None,   # "GBM" or "OU"
+    "applied_from":   None,
+    # FIX WEEKLY-INIT: pre-initialise wdf so Weekly tab never hits NameError
+    "wdf":            None,
 }
 for _k, _v in _defaults.items():
     if _k not in st.session_state:
         st.session_state[_k] = _v
-
-# ── SAVE-01 helper: track last-known param fingerprint ────────────────────────
-def _param_fingerprint(model, S0, T, mu_or_kappa, sigma, theta_or_none):
-    return (model, S0, T, mu_or_kappa, sigma, theta_or_none)
 
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
@@ -701,7 +722,6 @@ with st.sidebar:
         help="GBM: prices drift with random shocks. Mean-Reverting: prices gravitate to a long-run average."
     )
 
-    # FIX EST-08: warn user if params from the other model are still active
     if st.session_state.get("params_applied") and st.session_state.get("applied_from"):
         applied_from = st.session_state["applied_from"]
         current_is_gbm = "GBM" in model
@@ -769,12 +789,41 @@ with st.sidebar:
             price_col = st.selectbox("Price Column", numeric_cols)
             date_col  = st.selectbox("Date Column (optional)", ["None"] + all_cols)
 
-            _prices = df_raw[price_col].dropna().values
+            # FIX CSV-CLEAN: extract dates for sorting, then clean prices
+            _raw_prices = df_raw[price_col].values
+            _raw_dates  = None
+            if date_col and date_col != "None":
+                try:
+                    _raw_dates = pd.to_datetime(df_raw[date_col]).values
+                except Exception:
+                    _raw_dates = None
+
+            _prices, _, _n_dropped = clean_price_series(_raw_prices, _raw_dates)
+
+            if _n_dropped > 0:
+                st.markdown(
+                    f'<div class="warn-box">⚠️ Removed {_n_dropped} invalid row(s) '
+                    f'(zero, negative, or non-finite prices) before estimation.</div>',
+                    unsafe_allow_html=True
+                )
+
             if len(_prices) >= 10:
                 gbm_est = compute_gbm_params(_prices, est_freq)
                 ou_est  = compute_ou_params(_prices, est_freq)
 
-                # FIX EST-09: show warning if constant series was detected
+                # Warn if single outlier may be distorting σ
+                lr = gbm_est["log_returns"]
+                if len(lr) > 0:
+                    z_scores = np.abs((lr - np.mean(lr)) / (np.std(lr) + 1e-12))
+                    n_outliers = int(np.sum(z_scores > 4))
+                    if n_outliers > 0:
+                        st.markdown(
+                            f'<div class="warn-box">⚠️ {n_outliers} extreme return(s) detected '
+                            f'(|z| &gt; 4). These may inflate σ significantly. '
+                            f'Verify your data for data-entry errors.</div>',
+                            unsafe_allow_html=True
+                        )
+
                 if ou_est.get("_constant_series"):
                     st.markdown(
                         '<div class="warn-box">⚠️ Price series is constant (zero variance). '
@@ -817,21 +866,34 @@ with st.sidebar:
                     apply_label = "✅ Apply OU Parameters"
 
                 st.markdown("")
-                ou_ok_to_apply = not (ou_est.get("_constant_series") and "Mean-Reverting" in model)
-                if ou_ok_to_apply and st.button(apply_label, width='stretch'):
-                    if "GBM" in model:
-                        st.session_state["param_mu"]    = float(round(gbm_est["mu_ito"], 4))
-                        st.session_state["param_sigma"] = float(round(gbm_est["sigma_annual"], 4))
-                        st.session_state["applied_from"] = "GBM"
-                    else:
-                        st.session_state["param_kappa"] = float(round(max(ou_est["k"], 0.001), 4))
-                        st.session_state["param_theta"] = float(round(ou_est["theta"], 2))
-                        st.session_state["param_sigma"] = float(round(ou_est["sigma_ou"], 4))
-                        st.session_state["applied_from"] = "OU"
-                    st.session_state["params_applied"] = True
-                    # FIX SAVE-01: applying new params invalidates any previous sim
-                    st.session_state["sim_ran"] = False
-                    st.rerun()
+                # FIX OU-APPLY: block Apply when κ ≤ 0 (would silently substitute floor value)
+                _constant   = ou_est.get("_constant_series", False)
+                _ou_k_valid = ou_est.get("k", 0) > 0
+                _can_apply_ou  = (not _constant) and _ou_k_valid
+                _can_apply_gbm = not _constant
+
+                can_apply = _can_apply_gbm if "GBM" in model else _can_apply_ou
+
+                if can_apply:
+                    if st.button(apply_label, width='stretch'):
+                        if "GBM" in model:
+                            st.session_state["param_mu"]    = float(round(gbm_est["mu_ito"], 4))
+                            st.session_state["param_sigma"] = float(round(gbm_est["sigma_annual"], 4))
+                            st.session_state["applied_from"] = "GBM"
+                        else:
+                            st.session_state["param_kappa"] = float(round(ou_est["k"], 4))
+                            st.session_state["param_theta"] = float(round(ou_est["theta"], 2))
+                            st.session_state["param_sigma"] = float(round(ou_est["sigma_ou"], 4))
+                            st.session_state["applied_from"] = "OU"
+                        st.session_state["params_applied"] = True
+                        st.session_state["sim_ran"] = False
+                        st.rerun()
+                elif "Mean-Reverting" in model and not _ou_k_valid and not _constant:
+                    st.markdown(
+                        '<div class="warn-box">Apply blocked: κ ≤ 0 means no mean reversion. '
+                        'Switch to GBM or use a dataset that shows reversion.</div>',
+                        unsafe_allow_html=True
+                    )
 
             else:
                 st.warning("Need at least 10 data points to estimate parameters.")
@@ -847,7 +909,7 @@ with st.sidebar:
         if st.button("↩ Reset to defaults", width='content'):
             for _k, _v in _defaults.items():
                 st.session_state[_k] = _v
-            st.session_state["sim_ran"] = False  # FIX SAVE-01
+            st.session_state["sim_ran"] = False
             st.rerun()
 
     if "GBM" in model:
@@ -856,28 +918,41 @@ with st.sidebar:
             step=0.001, format="%.4f",
         )
         sigma = st.number_input(
-            "Annual volatility σ", min_value=0.001, value=float(st.session_state["param_sigma"]),
+            "Annual volatility σ", min_value=0.001, max_value=5.0,
+            value=float(st.session_state["param_sigma"]),
             step=0.001, format="%.4f",
+            help="Max 5.0 (500%). Values above ~1.0 produce very wide distributions."
         )
-        # FIX SAVE-01: invalidate sim if params changed manually
         if mu != st.session_state["param_mu"] or sigma != st.session_state["param_sigma"]:
             st.session_state["sim_ran"] = False
         st.session_state["param_mu"]    = mu
         st.session_state["param_sigma"] = sigma
     else:
         kappa = st.number_input(
-            "Mean-reversion speed κ", min_value=0.001, value=float(st.session_state["param_kappa"]),
+            "Mean-reversion speed κ", min_value=0.001, max_value=100.0,
+            value=float(st.session_state["param_kappa"]),
             step=0.01, format="%.4f",
+            help="κ=0.001 → half-life ≈ 693 yrs (no reversion). Typical commodity values: 0.3–3.0."
         )
+        # FIX KAPPA-WARN: warn when κ implies an economically meaningless half-life
+        if kappa < 0.05:
+            hl_warn = np.log(2) / kappa
+            st.markdown(
+                f'<div class="warn-box">⚠️ κ={kappa:.4f} implies a half-life of '
+                f'<b>{hl_warn:.1f} years</b> — effectively no mean reversion at this horizon. '
+                f'Consider using GBM instead.</div>',
+                unsafe_allow_html=True
+            )
         theta = st.number_input(
             "Long-run mean θ (₱/Lkg)", min_value=0.01, value=float(st.session_state["param_theta"]),
             step=50.0,
         )
         sigma = st.number_input(
-            "Annual volatility σ", min_value=0.001, value=float(st.session_state["param_sigma"]),
+            "Annual volatility σ", min_value=0.001, max_value=5.0,
+            value=float(st.session_state["param_sigma"]),
             step=0.001, format="%.4f",
+            help="Max 5.0 (500%). Values above ~1.0 produce very wide distributions."
         )
-        # FIX SAVE-01: invalidate sim if params changed manually
         if (kappa != st.session_state["param_kappa"] or
                 theta != st.session_state["param_theta"] or
                 sigma != st.session_state["param_sigma"]):
@@ -894,7 +969,12 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown("### Simulation Settings")
-    N_sim = st.number_input("Terminal simulations (N)", min_value=100, value=5000, step=1000)
+    # FIX N-SIM-CAP: cap N_sim to prevent OOM on hosted deployments
+    N_sim = st.number_input(
+        "Terminal simulations (N)", min_value=100, max_value=100_000,
+        value=5000, step=1000,
+        help="Capped at 100,000 to prevent server timeouts."
+    )
     K     = st.number_input("Sample paths to display", min_value=1, value=30, step=5)
     seed  = st.number_input("Random seed", min_value=0, value=42, step=1)
 
@@ -958,10 +1038,32 @@ with tab_est:
         st.markdown("#### Expected CSV format")
         st.dataframe(sample, width='stretch')
     else:
-        prices_est = df_raw[price_col].dropna().values
+        # FIX CSV-CLEAN: use the already-cleaned series (with date sort applied)
+        _raw_prices_est = df_raw[price_col].values
+        _raw_dates_est  = None
+        if date_col and date_col != "None":
+            try:
+                _raw_dates_est = pd.to_datetime(df_raw[date_col]).values
+            except Exception:
+                _raw_dates_est = None
+
+        prices_est, dates_est_clean, n_dropped_est = clean_price_series(_raw_prices_est, _raw_dates_est)
+
+        if n_dropped_est > 0:
+            st.markdown(
+                f'<div class="warn-box">⚠️ {n_dropped_est} invalid price(s) removed '
+                f'(zero, negative, or non-finite) before estimation.</div>',
+                unsafe_allow_html=True
+            )
+
+        # Choose x-axis for the price chart
+        if dates_est_clean is not None:
+            dates_est = dates_est_clean
+        else:
+            dates_est = np.arange(len(prices_est))
 
         if len(prices_est) < 10:
-            st.error("Need at least 10 data points.")
+            st.error("Need at least 10 valid data points.")
             st.stop()
 
         min_recommended = {"Daily": 500, "Weekly": 104, "Monthly": 36, "Yearly": 5}
@@ -972,20 +1074,23 @@ with tab_est:
                 f"For {est_freq.lower()} data, at least {min_rec} rows are recommended."
             )
 
-        if date_col and date_col != "None":
-            try:
-                dates_est = pd.to_datetime(df_raw[date_col].dropna().values[:len(prices_est)])
-            except Exception:
-                dates_est = np.arange(len(prices_est))
-        else:
-            dates_est = np.arange(len(prices_est))
-
         gbm = compute_gbm_params(prices_est, est_freq)
         ou  = compute_ou_params(prices_est, est_freq)
         N_ann = annualization_factor(est_freq)
         dt    = dt_value(est_freq)
 
-        # FIX EST-09: show warning if constant series
+        # Outlier check
+        lr_est = gbm["log_returns"]
+        if len(lr_est) > 0:
+            z_scores_est = np.abs((lr_est - np.mean(lr_est)) / (np.std(lr_est) + 1e-12))
+            n_out_est = int(np.sum(z_scores_est > 4))
+            if n_out_est > 0:
+                st.markdown(
+                    f'<div class="warn-box">⚠️ {n_out_est} extreme return(s) detected '
+                    f'(|z| &gt; 4). These may inflate σ. Verify your source data.</div>',
+                    unsafe_allow_html=True
+                )
+
         if ou.get("_constant_series"):
             st.markdown(
                 '<div class="warn-box">⚠️ <b>Constant price series detected.</b> All prices are identical, '
@@ -1148,20 +1253,31 @@ with tab_est:
             )
         with apply_col:
             apply_target = "GBM" if "GBM" in model else "OU"
-            can_apply = not (ou.get("_constant_series") and "Mean-Reverting" in model)
-            if can_apply and st.button(f"✅ Apply {apply_target} Parameters to Simulation →", width='stretch'):
-                if "GBM" in model:
-                    st.session_state["param_mu"]    = float(round(gbm["mu_ito"], 4))
-                    st.session_state["param_sigma"] = float(round(gbm["sigma_annual"], 4))
-                    st.session_state["applied_from"] = "GBM"
-                else:
-                    st.session_state["param_kappa"] = float(round(max(ou["k"], 0.001), 4))
-                    st.session_state["param_theta"] = float(round(ou["theta"], 2))
-                    st.session_state["param_sigma"] = float(round(ou["sigma_ou"], 4))
-                    st.session_state["applied_from"] = "OU"
-                st.session_state["params_applied"] = True
-                st.session_state["sim_ran"] = False  # FIX SAVE-01
-                st.rerun()
+            # FIX OU-APPLY: same gate as sidebar — block when κ ≤ 0
+            _ou_k_valid_tab = ou.get("k", 0) > 0
+            _constant_tab   = ou.get("_constant_series", False)
+            can_apply_tab = (not _constant_tab) and (_ou_k_valid_tab if "Mean-Reverting" in model else True)
+            if can_apply_tab:
+                if st.button(f"✅ Apply {apply_target} Parameters to Simulation →", width='stretch'):
+                    if "GBM" in model:
+                        st.session_state["param_mu"]    = float(round(gbm["mu_ito"], 4))
+                        st.session_state["param_sigma"] = float(round(gbm["sigma_annual"], 4))
+                        st.session_state["applied_from"] = "GBM"
+                    else:
+                        st.session_state["param_kappa"] = float(round(ou["k"], 4))
+                        st.session_state["param_theta"] = float(round(ou["theta"], 2))
+                        st.session_state["param_sigma"] = float(round(ou["sigma_ou"], 4))
+                        st.session_state["applied_from"] = "OU"
+                    st.session_state["params_applied"] = True
+                    st.session_state["sim_ran"] = False
+                    st.rerun()
+            else:
+                st.markdown(
+                    f'<div class="warn-box">Apply {apply_target} blocked: '
+                    + ("κ ≤ 0 — no reversion detected." if not _ou_k_valid_tab else "Constant series.")
+                    + '</div>',
+                    unsafe_allow_html=True
+                )
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -1366,17 +1482,22 @@ with tab_sim:
 # TAB 3 — Weekly Price Prediction
 # ════════════════════════════════════════════════════════════════════════════════
 with tab_weekly:
+    # FIX WEEKLY-INIT: guard the entire tab — compute wdf only when sim has run
     if not run and not st.session_state.get("sim_ran"):
         st.info("👈  Configure the sidebar and click **Run Simulation** to generate the weekly prediction chart.", icon="💡")
-    else:
-        with st.spinner("Computing week-by-week predictions…"):
-            n_weeks_int = int(weekly_n_weeks)
-            N_sim_int   = int(N_sim)
+        st.stop()
 
-            if "GBM" in model:
-                wdf = run_weekly_gbm(S0, mu, sigma, n_weeks_int, N_sim_int, seed + 99)
-            else:
-                wdf = run_weekly_ou(S0, kappa, theta, sigma, n_weeks_int, N_sim_int, seed + 99)
+    with st.spinner("Computing week-by-week predictions…"):
+        n_weeks_int = int(weekly_n_weeks)
+        N_sim_int   = int(N_sim)
+
+        if "GBM" in model:
+            wdf = run_weekly_gbm(S0, mu, sigma, n_weeks_int, N_sim_int, seed + 99)
+        else:
+            wdf = run_weekly_ou(S0, kappa, theta, sigma, n_weeks_int, N_sim_int, seed + 99)
+
+        # Cache wdf in session_state so it survives reruns without a new sim
+        st.session_state["wdf"] = wdf
 
     bar_col   = "median" if weekly_display == "Median (P50)" else "mean"
     bar_label = "Median" if weekly_display == "Median (P50)" else "Mean"
@@ -1409,7 +1530,6 @@ with tab_weekly:
 
     w1, w2, w3, w4, w5 = st.columns(5)
     w1.metric("Week 1 Forecast",      f"₱{bar_vals[0]:,.0f}",  f"{(bar_vals[0]/S0-1)*100:+.1f}% vs spot")
-    # FIX WKL-03: correct mid-week index (was n_weeks//2 - 1, wrong for odd counts)
     mid_idx = min(n_weeks_int // 2, n_weeks_int - 1)
     w2.metric(f"Week {mid_idx+1} Forecast", f"₱{bar_vals[mid_idx]:,.0f}", f"{(bar_vals[mid_idx]/S0-1)*100:+.1f}% vs spot")
     w3.metric(f"Week {n_weeks_int} Forecast", f"₱{bar_vals[-1]:,.0f}", f"{(bar_vals[-1]/S0-1)*100:+.1f}% vs spot")
@@ -1597,10 +1717,13 @@ with tab_saved:
         if not runs:
             st.info("No saved runs yet. Run a simulation and click **💾 Save This Run** to save it here.")
         else:
-            st.caption(f"{len(runs)} saved run{'s' if len(runs) != 1 else ''} for {_user.email}")
+            # FIX DB-LIMIT: inform user that only the 50 most recent runs are shown
+            st.caption(
+                f"{len(runs)} saved run{'s' if len(runs) != 1 else ''} shown "
+                f"(most recent 50) · {_user.email}"
+            )
 
             for i, run_row in enumerate(runs):
-                # FIX SAVE-02: protect json.loads for each row individually
                 try:
                     p = json.loads(run_row.get("params", "{}") or "{}")
                 except (json.JSONDecodeError, TypeError):
