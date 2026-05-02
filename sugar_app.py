@@ -222,8 +222,8 @@ def render_auth_page():
 
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Sugar Price Risk Model",
-    page_icon="🎋",
+    page_title="Sugar Price Prediction and Risk Model",
+    page_icon="🍬",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -991,7 +991,7 @@ with st.sidebar:
 
 # ── Title ──────────────────────────────────────────────────────────────────────
 st.markdown('''
-<div class="page-title">🍬 Sugar Price Monte Carlo Risk & Price Prediction Model </div>
+<div class="page-title">🍬 Sugar Price Prediction & Monte Carlo Risk Model </div>
 <div class="page-subtitle">Risk Assesment · Price Prediction</div>
 ''', unsafe_allow_html=True)
 col_model, col_spot, col_horizon = st.columns(3)
