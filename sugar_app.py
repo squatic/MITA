@@ -78,7 +78,6 @@ def save_simulation(user_id: str, params: dict, results: dict, token: str = None
         st.warning(f"Could not save simulation: {e}")
         return False
 
-# FIX DB-LIMIT: cap fetched rows to 50 to prevent timeouts on large history
 def load_simulations(user_id: str, token: str = None, refresh: str = None):
     try:
         _try_set_session(supabase, token, refresh)
@@ -148,7 +147,8 @@ def render_auth_page():
            color:#e8dcc8; letter-spacing:-0.02em; margin-bottom:0.4rem;">
         Sugar Price Risk Model
       </div>
-      <div style="font-family:'Space Mono',monospace; font-size:0.72rem; color:#ccfa34;
+      <!-- FIX ACCESSIBILITY: restored #3a6b45 (theme-safe green) instead of #ccfa34 (fails light mode) -->
+      <div style="font-family:'Space Mono',monospace; font-size:0.72rem; color:#3a6b45;
            letter-spacing:0.2em; text-transform:uppercase; margin-bottom:0.5rem;">
         Monte Carlo · Ornstein–Uhlenbeck · GBM Analytics
       </div>
@@ -204,7 +204,6 @@ def render_auth_page():
                         res = auth_signup(email2, pw2)
                         st.success("✅ Account created! Check your email to confirm, then sign in.")
                     except Exception as e:
-                        # FIX AUTH-SIGNUP: friendly message for duplicate email
                         msg = str(e)
                         if "already registered" in msg.lower() or "already exists" in msg.lower():
                             st.error("An account with this email already exists. Please sign in instead.")
@@ -213,8 +212,9 @@ def render_auth_page():
 
         st.markdown("</div>", unsafe_allow_html=True)
         st.markdown("""
+        <!-- FIX ACCESSIBILITY: footer disclaimer uses theme-safe #3a6b45 instead of #ccfa34 -->
         <div style="text-align:center; margin-top:1.2rem; font-size:0.7rem;
-             color:#ccfa34; font-family:'Space Mono',monospace; letter-spacing:0.06em;">
+             color:#3a6b45; font-family:'Space Mono',monospace; letter-spacing:0.06em;">
           Mill-gate raw sugar · Philippines · Probabilistic estimates only
         </div>
         """, unsafe_allow_html=True)
@@ -482,7 +482,6 @@ def dt_value(freq: str) -> float:
     return {"Daily": 1/252, "Weekly": 1/52, "Monthly": 1/12, "Yearly": 1.0}[freq]
 
 
-# FIX CSV-CLEAN: strip non-positive prices and sort by date before estimation
 def clean_price_series(prices: np.ndarray, dates=None):
     """
     Returns (clean_prices, clean_dates, n_dropped) after:
@@ -501,7 +500,7 @@ def clean_price_series(prices: np.ndarray, dates=None):
             clean_prices = clean_prices[order]
             clean_dates  = clean_dates[order]
         except Exception:
-            pass  # if dates are not sortable, leave as-is
+            pass
 
     return clean_prices, clean_dates, n_dropped
 
@@ -528,7 +527,6 @@ def compute_gbm_params(prices: np.ndarray, freq: str) -> dict:
 def compute_ou_params(prices: np.ndarray, freq: str) -> dict:
     """
     Guard against zero-variance (constant) price series.
-    A constant series has beta == 0, causing ZeroDivisionError on theta = exp(-alpha/beta).
     """
     dt         = dt_value(freq)
     N          = annualization_factor(freq)
@@ -687,8 +685,9 @@ _defaults = {
     "param_theta":    2400.0,
     "params_applied": False,
     "applied_from":   None,
-    # FIX WEEKLY-INIT: pre-initialise wdf so Weekly tab never hits NameError
     "wdf":            None,
+    # FIX PERFORMANCE: track the param signature that produced the cached wdf
+    "wdf_cache_key":  None,
 }
 for _k, _v in _defaults.items():
     if _k not in st.session_state:
@@ -757,8 +756,9 @@ with st.sidebar:
     st.markdown("---")
 
     st.markdown("### 📁 Historical Data (optional)")
+    # FIX ACCESSIBILITY: sidebar helper text restored to neutral #6b7280 (passes contrast in both themes)
     st.markdown(
-        '<div style="font-size:11px;color:#ccfa34;font-family:\'IBM Plex Mono\',monospace;margin-bottom:8px">'
+        '<div style="font-size:11px;color:#6b7280;font-family:\'IBM Plex Mono\',monospace;margin-bottom:8px">'
         'Upload a price CSV to auto-estimate model parameters.</div>',
         unsafe_allow_html=True
     )
@@ -789,7 +789,6 @@ with st.sidebar:
             price_col = st.selectbox("Price Column", numeric_cols)
             date_col  = st.selectbox("Date Column (optional)", ["None"] + all_cols)
 
-            # FIX CSV-CLEAN: extract dates for sorting, then clean prices
             _raw_prices = df_raw[price_col].values
             _raw_dates  = None
             if date_col and date_col != "None":
@@ -811,7 +810,6 @@ with st.sidebar:
                 gbm_est = compute_gbm_params(_prices, est_freq)
                 ou_est  = compute_ou_params(_prices, est_freq)
 
-                # Warn if single outlier may be distorting σ
                 lr = gbm_est["log_returns"]
                 if len(lr) > 0:
                     z_scores = np.abs((lr - np.mean(lr)) / (np.std(lr) + 1e-12))
@@ -866,7 +864,6 @@ with st.sidebar:
                     apply_label = "✅ Apply OU Parameters"
 
                 st.markdown("")
-                # FIX OU-APPLY: block Apply when κ ≤ 0 (would silently substitute floor value)
                 _constant   = ou_est.get("_constant_series", False)
                 _ou_k_valid = ou_est.get("k", 0) > 0
                 _can_apply_ou  = (not _constant) and _ou_k_valid
@@ -934,7 +931,6 @@ with st.sidebar:
             step=0.01, format="%.4f",
             help="κ=0.001 → half-life ≈ 693 yrs (no reversion). Typical commodity values: 0.3–3.0."
         )
-        # FIX KAPPA-WARN: warn when κ implies an economically meaningless half-life
         if kappa < 0.05:
             hl_warn = np.log(2) / kappa
             st.markdown(
@@ -969,7 +965,6 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown("### Simulation Settings")
-    # FIX N-SIM-CAP: cap N_sim to prevent OOM on hosted deployments
     N_sim = st.number_input(
         "Terminal simulations (N)", min_value=100, max_value=100_000,
         value=5000, step=1000,
@@ -1038,7 +1033,6 @@ with tab_est:
         st.markdown("#### Expected CSV format")
         st.dataframe(sample, width='stretch')
     else:
-        # FIX CSV-CLEAN: use the already-cleaned series (with date sort applied)
         _raw_prices_est = df_raw[price_col].values
         _raw_dates_est  = None
         if date_col and date_col != "None":
@@ -1056,7 +1050,6 @@ with tab_est:
                 unsafe_allow_html=True
             )
 
-        # Choose x-axis for the price chart
         if dates_est_clean is not None:
             dates_est = dates_est_clean
         else:
@@ -1079,7 +1072,6 @@ with tab_est:
         N_ann = annualization_factor(est_freq)
         dt    = dt_value(est_freq)
 
-        # Outlier check
         lr_est = gbm["log_returns"]
         if len(lr_est) > 0:
             z_scores_est = np.abs((lr_est - np.mean(lr_est)) / (np.std(lr_est) + 1e-12))
@@ -1253,7 +1245,6 @@ with tab_est:
             )
         with apply_col:
             apply_target = "GBM" if "GBM" in model else "OU"
-            # FIX OU-APPLY: same gate as sidebar — block when κ ≤ 0
             _ou_k_valid_tab = ou.get("k", 0) > 0
             _constant_tab   = ou.get("_constant_series", False)
             can_apply_tab = (not _constant_tab) and (_ou_k_valid_tab if "Mean-Reverting" in model else True)
@@ -1342,362 +1333,387 @@ with tab_sim:
         prob_be  = _r["prob_be"]
         rev_risk = var95 * volume if volume > 0 else None
 
-    if not st.session_state.get("sim_ran"):
-        st.stop()
+        st.markdown('<div class="section-header">Key Statistics at Horizon</div>', unsafe_allow_html=True)
+        k1, k2, k3, k4, k5 = st.columns(5)
+        k1.metric("Mean Price",              f"₱{mean_p:,.0f}",  f"{(mean_p/S0-1)*100:+.1f}% vs spot")
+        k2.metric("Median Price",            f"₱{median_p:,.0f}", f"{(median_p/S0-1)*100:+.1f}% vs spot")
+        k3.metric("Std Deviation",           f"₱{std_p:,.0f}")
+        k4.metric("VaR 95%",                 f"₱{var95:,.0f}",   "Max likely downside (1-in-20)")
+        k5.metric("P(Price ≤ Break-even)",   f"{prob_be*100:.1f}%")
 
-    st.markdown('<div class="section-header">Key Statistics at Horizon</div>', unsafe_allow_html=True)
-    k1, k2, k3, k4, k5 = st.columns(5)
-    k1.metric("Mean Price",              f"₱{mean_p:,.0f}",  f"{(mean_p/S0-1)*100:+.1f}% vs spot")
-    k2.metric("Median Price",            f"₱{median_p:,.0f}", f"{(median_p/S0-1)*100:+.1f}% vs spot")
-    k3.metric("Std Deviation",           f"₱{std_p:,.0f}")
-    k4.metric("VaR 95%",                 f"₱{var95:,.0f}",   "Max likely downside (1-in-20)")
-    k5.metric("P(Price ≤ Break-even)",   f"{prob_be*100:.1f}%")
-
-    st.markdown("")
-    if prob_be > 0.30:
-        st.markdown(f'<div class="alert-danger">⚠️ High risk: <b>{prob_be*100:.1f}%</b> probability of finishing at or below ₱{breakeven:,.0f}/Lkg.</div>', unsafe_allow_html=True)
-    elif prob_be > 0.10:
-        st.markdown(f'<div class="alert-danger">⚠️ Moderate risk: <b>{prob_be*100:.1f}%</b> probability of finishing at or below ₱{breakeven:,.0f}/Lkg.</div>', unsafe_allow_html=True)
-    else:
-        st.markdown(f'<div class="alert-safe">✅ Low risk: only <b>{prob_be*100:.1f}%</b> probability of finishing at or below ₱{breakeven:,.0f}/Lkg.</div>', unsafe_allow_html=True)
-
-    if rev_risk is not None:
-        st.markdown(f'<div class="alert-danger" style="margin-top:6px">Revenue at Risk (VaR × Volume): <b>₱{rev_risk:,.0f}</b></div>', unsafe_allow_html=True)
-
-    st.markdown("")
-    save_col, _ = st.columns([1, 3])
-    with save_col:
-        if st.button("💾 Save This Run", width='stretch'):
-            if not SUPABASE_OK:
-                st.warning("Supabase not configured — cannot save.")
-            elif not st.session_state.get("sim_ran"):
-                st.warning("Run a simulation first before saving.")
-            else:
-                ok = save_simulation(
-                    _user.id,
-                    st.session_state["last_sim_params"],
-                    st.session_state["last_sim_results"],
-                    token=st.session_state.get("access_token"),
-                    refresh=st.session_state.get("refresh_token"),
-                )
-                if ok:
-                    st.success("✅ Simulation saved! View it in the 💾 Saved Runs tab.")
-
-    st.markdown('<div class="section-header">Price Distribution at Horizon</div>', unsafe_allow_html=True)
-    tab_dist, tab_paths, tab_pct = st.tabs(["📊 Distribution", "📈 Price Paths", "🔢 Percentile Table"])
-
-    with tab_dist:
-        fig = go.Figure()
-        fig.add_trace(go.Histogram(x=terminal, nbinsx=80, name="Simulated prices",
-                                   marker_color=TEAL, opacity=0.75,
-                                   hovertemplate="Price: ₱%{x:,.0f}<br>Count: %{y}<extra></extra>"))
-        hist_vals, bin_edges = np.histogram(terminal, bins=80)
-        below_mask = bin_edges[:-1] <= p05
-        fig.add_trace(go.Bar(x=bin_edges[:-1][below_mask], y=hist_vals[below_mask],
-                             width=np.diff(bin_edges)[0], marker_color=RED_CLR, opacity=0.6,
-                             name="Below P05 (VaR zone)",
-                             hovertemplate="Price: ₱%{x:,.0f}<br>Count: %{y}<extra></extra>"))
-        for val, label, color in [
-            (p05, f"P05  ₱{p05:,.0f}", RED_CLR),
-            (p95, f"P95  ₱{p95:,.0f}", GREEN_OK),
-            (mean_p, f"Mean ₱{mean_p:,.0f}", GOLD),
-            (breakeven, f"Break-even ₱{breakeven:,.0f}", "#e8a0a0"),
-        ]:
-            fig.add_vline(x=val, line_dash="dash", line_color=color, line_width=1.5,
-                          annotation_text=label, annotation_font_color=color,
-                          annotation_font_size=11, annotation_position="top")
-        fig.update_layout(
-            paper_bgcolor=DARK_BG, plot_bgcolor=DARK_BG, font_color=TEXT_CLR,
-            xaxis=dict(title="Terminal Price (₱/Lkg)", gridcolor=GRID_CLR, zeroline=False),
-            yaxis=dict(title="Number of simulations", gridcolor=GRID_CLR),
-            legend=dict(bgcolor=DARK_BG, bordercolor=GRID_CLR, borderwidth=1),
-            margin=dict(t=30, b=50, l=50, r=30), height=420, barmode="overlay",
-        )
-        st.plotly_chart(fig, width='stretch')
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("P05 (worst 5%)",  f"₱{p05:,.0f}",  f"{(p05/S0-1)*100:+.1f}% vs spot")
-        c2.metric("P25",             f"₱{p25:,.0f}",  f"{(p25/S0-1)*100:+.1f}% vs spot")
-        c3.metric("P75",             f"₱{p75:,.0f}",  f"{(p75/S0-1)*100:+.1f}% vs spot")
-        c4.metric("P95 (best 5%)",   f"₱{p95:,.0f}",  f"{(p95/S0-1)*100:+.1f}% vs spot")
-        st.caption(f"Expected Shortfall (avg price when ≤ P05): **₱{es95:,.0f}/Lkg**  —  Based on {N_sim:,} simulations.")
-
-    with tab_paths:
-        if horizon_unit == "Weeks":
-            times_display = times * 52
-        elif horizon_unit == "Months":
-            times_display = times * 12
+        st.markdown("")
+        if prob_be > 0.30:
+            st.markdown(f'<div class="alert-danger">⚠️ High risk: <b>{prob_be*100:.1f}%</b> probability of finishing at or below ₱{breakeven:,.0f}/Lkg.</div>', unsafe_allow_html=True)
+        elif prob_be > 0.10:
+            st.markdown(f'<div class="alert-danger">⚠️ Moderate risk: <b>{prob_be*100:.1f}%</b> probability of finishing at or below ₱{breakeven:,.0f}/Lkg.</div>', unsafe_allow_html=True)
         else:
-            times_display = times
+            st.markdown(f'<div class="alert-safe">✅ Low risk: only <b>{prob_be*100:.1f}%</b> probability of finishing at or below ₱{breakeven:,.0f}/Lkg.</div>', unsafe_allow_html=True)
 
-        fig2 = go.Figure()
-        path_at_t = np.percentile(paths, [5, 25, 50, 75, 95], axis=1)
-        fig2.add_trace(go.Scatter(
-            x=np.concatenate([times_display, times_display[::-1]]),
-            y=np.concatenate([path_at_t[4], path_at_t[0][::-1]]),
-            fill="toself", fillcolor="rgba(74,159,181,0.1)", line_color="rgba(0,0,0,0)",
-            name="P05–P95 range", hoverinfo="skip"))
-        fig2.add_trace(go.Scatter(
-            x=np.concatenate([times_display, times_display[::-1]]),
-            y=np.concatenate([path_at_t[3], path_at_t[1][::-1]]),
-            fill="toself", fillcolor="rgba(74,159,181,0.2)", line_color="rgba(0,0,0,0)",
-            name="P25–P75 range", hoverinfo="skip"))
-        display_k = min(K, 25)
-        for i in range(display_k):
+        if rev_risk is not None:
+            st.markdown(f'<div class="alert-danger" style="margin-top:6px">Revenue at Risk (VaR × Volume): <b>₱{rev_risk:,.0f}</b></div>', unsafe_allow_html=True)
+
+        st.markdown("")
+        save_col, _ = st.columns([1, 3])
+        with save_col:
+            if st.button("💾 Save This Run", width='stretch'):
+                if not SUPABASE_OK:
+                    st.warning("Supabase not configured — cannot save.")
+                elif not st.session_state.get("sim_ran"):
+                    st.warning("Run a simulation first before saving.")
+                else:
+                    ok = save_simulation(
+                        _user.id,
+                        st.session_state["last_sim_params"],
+                        st.session_state["last_sim_results"],
+                        token=st.session_state.get("access_token"),
+                        refresh=st.session_state.get("refresh_token"),
+                    )
+                    if ok:
+                        st.success("✅ Simulation saved! View it in the 💾 Saved Runs tab.")
+
+        st.markdown('<div class="section-header">Price Distribution at Horizon</div>', unsafe_allow_html=True)
+        tab_dist, tab_paths, tab_pct = st.tabs(["📊 Distribution", "📈 Price Paths", "🔢 Percentile Table"])
+
+        with tab_dist:
+            fig = go.Figure()
+            fig.add_trace(go.Histogram(x=terminal, nbinsx=80, name="Simulated prices",
+                                       marker_color=TEAL, opacity=0.75,
+                                       hovertemplate="Price: ₱%{x:,.0f}<br>Count: %{y}<extra></extra>"))
+            hist_vals, bin_edges = np.histogram(terminal, bins=80)
+            below_mask = bin_edges[:-1] <= p05
+            fig.add_trace(go.Bar(x=bin_edges[:-1][below_mask], y=hist_vals[below_mask],
+                                 width=np.diff(bin_edges)[0], marker_color=RED_CLR, opacity=0.6,
+                                 name="Below P05 (VaR zone)",
+                                 hovertemplate="Price: ₱%{x:,.0f}<br>Count: %{y}<extra></extra>"))
+            for val, label, color in [
+                (p05, f"P05  ₱{p05:,.0f}", RED_CLR),
+                (p95, f"P95  ₱{p95:,.0f}", GREEN_OK),
+                (mean_p, f"Mean ₱{mean_p:,.0f}", GOLD),
+                (breakeven, f"Break-even ₱{breakeven:,.0f}", "#e8a0a0"),
+            ]:
+                fig.add_vline(x=val, line_dash="dash", line_color=color, line_width=1.5,
+                              annotation_text=label, annotation_font_color=color,
+                              annotation_font_size=11, annotation_position="top")
+            fig.update_layout(
+                paper_bgcolor=DARK_BG, plot_bgcolor=DARK_BG, font_color=TEXT_CLR,
+                xaxis=dict(title="Terminal Price (₱/Lkg)", gridcolor=GRID_CLR, zeroline=False),
+                yaxis=dict(title="Number of simulations", gridcolor=GRID_CLR),
+                legend=dict(bgcolor=DARK_BG, bordercolor=GRID_CLR, borderwidth=1),
+                margin=dict(t=30, b=50, l=50, r=30), height=420, barmode="overlay",
+            )
+            st.plotly_chart(fig, width='stretch')
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("P05 (worst 5%)",  f"₱{p05:,.0f}",  f"{(p05/S0-1)*100:+.1f}% vs spot")
+            c2.metric("P25",             f"₱{p25:,.0f}",  f"{(p25/S0-1)*100:+.1f}% vs spot")
+            c3.metric("P75",             f"₱{p75:,.0f}",  f"{(p75/S0-1)*100:+.1f}% vs spot")
+            c4.metric("P95 (best 5%)",   f"₱{p95:,.0f}",  f"{(p95/S0-1)*100:+.1f}% vs spot")
+            st.caption(f"Expected Shortfall (avg price when ≤ P05): **₱{es95:,.0f}/Lkg**  —  Based on {N_sim:,} simulations.")
+
+        with tab_paths:
+            if horizon_unit == "Weeks":
+                times_display = times * 52
+            elif horizon_unit == "Months":
+                times_display = times * 12
+            else:
+                times_display = times
+
+            fig2 = go.Figure()
+            path_at_t = np.percentile(paths, [5, 25, 50, 75, 95], axis=1)
             fig2.add_trace(go.Scatter(
-                x=times_display, y=paths[:, i], mode="lines",
-                line=dict(color=TEAL, width=0.6), opacity=0.35,
-                showlegend=False, hoverinfo="skip"))
-        fig2.add_trace(go.Scatter(
-            x=times_display, y=path_at_t[2], mode="lines",
-            line=dict(color=GOLD, width=2.5), name="Median path"))
-        fig2.add_hline(y=breakeven, line_dash="dot", line_color=RED_CLR, line_width=1.5,
-                       annotation_text=f"Break-even ₱{breakeven:,.0f}", annotation_font_color=RED_CLR)
-        fig2.update_layout(
-            paper_bgcolor=DARK_BG, plot_bgcolor=DARK_BG, font_color=TEXT_CLR,
-            xaxis=dict(title=f"{horizon_unit} from now", gridcolor=GRID_CLR),
-            yaxis=dict(title="Price (₱/Lkg)", gridcolor=GRID_CLR),
-            legend=dict(bgcolor=DARK_BG, bordercolor=GRID_CLR, borderwidth=1),
-            margin=dict(t=30, b=50, l=50, r=30), height=430,
-        )
-        st.plotly_chart(fig2, width='stretch')
-        st.caption(f"Showing {display_k} sample paths with P05–P95 and P25–P75 confidence bands.")
+                x=np.concatenate([times_display, times_display[::-1]]),
+                y=np.concatenate([path_at_t[4], path_at_t[0][::-1]]),
+                fill="toself", fillcolor="rgba(74,159,181,0.1)", line_color="rgba(0,0,0,0)",
+                name="P05–P95 range", hoverinfo="skip"))
+            fig2.add_trace(go.Scatter(
+                x=np.concatenate([times_display, times_display[::-1]]),
+                y=np.concatenate([path_at_t[3], path_at_t[1][::-1]]),
+                fill="toself", fillcolor="rgba(74,159,181,0.2)", line_color="rgba(0,0,0,0)",
+                name="P25–P75 range", hoverinfo="skip"))
+            display_k = min(K, 25)
+            for i in range(display_k):
+                fig2.add_trace(go.Scatter(
+                    x=times_display, y=paths[:, i], mode="lines",
+                    line=dict(color=TEAL, width=0.6), opacity=0.35,
+                    showlegend=False, hoverinfo="skip"))
+            fig2.add_trace(go.Scatter(
+                x=times_display, y=path_at_t[2], mode="lines",
+                line=dict(color=GOLD, width=2.5), name="Median path"))
+            fig2.add_hline(y=breakeven, line_dash="dot", line_color=RED_CLR, line_width=1.5,
+                           annotation_text=f"Break-even ₱{breakeven:,.0f}", annotation_font_color=RED_CLR)
+            fig2.update_layout(
+                paper_bgcolor=DARK_BG, plot_bgcolor=DARK_BG, font_color=TEXT_CLR,
+                xaxis=dict(title=f"{horizon_unit} from now", gridcolor=GRID_CLR),
+                yaxis=dict(title="Price (₱/Lkg)", gridcolor=GRID_CLR),
+                legend=dict(bgcolor=DARK_BG, bordercolor=GRID_CLR, borderwidth=1),
+                margin=dict(t=30, b=50, l=50, r=30), height=430,
+            )
+            st.plotly_chart(fig2, width='stretch')
+            st.caption(f"Showing {display_k} sample paths with P05–P95 and P25–P75 confidence bands.")
 
-    with tab_pct:
-        pcts = [1, 5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 75, 80, 85, 90, 95, 99]
-        vals = np.percentile(terminal, pcts)
-        rows = []
-        for p, v in zip(pcts, vals):
-            chg = (v / S0 - 1) * 100
-            rows.append({
-                "Percentile": f"P{p:02d}",
-                "Price (₱/Lkg)": f"₱{v:,.0f}",
-                "Change vs Spot": f"{chg:+.1f}%",
-                "Below Break-even?": "❌ Yes" if v <= breakeven else "✅ No",
-            })
-        st.dataframe(pd.DataFrame(rows), width='stretch', hide_index=True, height=520)
-        st.caption(f"Spot: ₱{S0:,.0f}/Lkg | Break-even: ₱{breakeven:,.0f}/Lkg | Model: {model}")
+        with tab_pct:
+            pcts = [1, 5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 75, 80, 85, 90, 95, 99]
+            vals = np.percentile(terminal, pcts)
+            rows = []
+            for p, v in zip(pcts, vals):
+                chg = (v / S0 - 1) * 100
+                rows.append({
+                    "Percentile": f"P{p:02d}",
+                    "Price (₱/Lkg)": f"₱{v:,.0f}",
+                    "Change vs Spot": f"{chg:+.1f}%",
+                    "Below Break-even?": "❌ Yes" if v <= breakeven else "✅ No",
+                })
+            st.dataframe(pd.DataFrame(rows), width='stretch', hide_index=True, height=520)
+            st.caption(f"Spot: ₱{S0:,.0f}/Lkg | Break-even: ₱{breakeven:,.0f}/Lkg | Model: {model}")
+    else:
+        # sim hasn't run yet — show placeholder inside the tab without st.stop()
+        pass
 
 
 # ════════════════════════════════════════════════════════════════════════════════
 # TAB 3 — Weekly Price Prediction
+# FIX CRITICAL: removed st.stop() from inside the tab block — it killed Tab 4.
+# FIX PERFORMANCE: wdf is only recomputed when `run` fired or params changed;
+#   display-only changes (interval/bar dropdowns) reuse the cached wdf.
 # ════════════════════════════════════════════════════════════════════════════════
 with tab_weekly:
-    # FIX WEEKLY-INIT: guard the entire tab — compute wdf only when sim has run
-    if not run and not st.session_state.get("sim_ran"):
-        st.info("👈  Configure the sidebar and click **Run Simulation** to generate the weekly prediction chart.", icon="💡")
-        st.stop()
+    _sim_has_run = st.session_state.get("sim_ran", False)
 
-    with st.spinner("Computing week-by-week predictions…"):
-        n_weeks_int = int(weekly_n_weeks)
-        N_sim_int   = int(N_sim)
-
-        if "GBM" in model:
-            wdf = run_weekly_gbm(S0, mu, sigma, n_weeks_int, N_sim_int, seed + 99)
-        else:
-            wdf = run_weekly_ou(S0, kappa, theta, sigma, n_weeks_int, N_sim_int, seed + 99)
-
-        # Cache wdf in session_state so it survives reruns without a new sim
-        st.session_state["wdf"] = wdf
-
-    bar_col   = "median" if weekly_display == "Median (P50)" else "mean"
-    bar_label = "Median" if weekly_display == "Median (P50)" else "Mean"
-    if weekly_interval == "P05–P95 (90%)":
-        lo_col, hi_col = "p05", "p95"
-        int_label = "P05–P95"
+    if not _sim_has_run and not run:
+        # FIX: show info message but DO NOT call st.stop() — allows Tab 4 to render
+        st.info(
+            "👈  Configure the sidebar and click **Run Simulation** to generate the weekly prediction chart.",
+            icon="💡"
+        )
     else:
-        lo_col, hi_col = "p25", "p75"
-        int_label = "P25–P75"
-
-    bar_vals = wdf[bar_col].values
-    lo_vals  = wdf[lo_col].values
-    hi_vals  = wdf[hi_col].values
-    weeks    = wdf["week"].values
-
-    err_plus  = hi_vals - bar_vals
-    err_minus = bar_vals - lo_vals
-
-    def bar_color(price, be):
-        if price <= be:
-            return RED_CLR
-        elif price <= be * 1.05:
-            return AMBER
+        # FIX PERFORMANCE: build a cache key from the params that affect wdf output.
+        # Only recompute when the key changes or when Run was explicitly clicked.
+        if "GBM" in model:
+            _wdf_key = ("GBM", S0, mu, sigma, int(weekly_n_weeks), int(N_sim), int(seed))
         else:
-            return GREEN_OK
+            _wdf_key = ("OU", S0, kappa, theta, sigma, int(weekly_n_weeks), int(N_sim), int(seed))
 
-    colors = [bar_color(v, breakeven) for v in bar_vals]
+        _need_recompute = (
+            run  # user clicked Run
+            or st.session_state.get("wdf") is None
+            or st.session_state.get("wdf_cache_key") != _wdf_key
+        )
 
-    st.markdown('<div class="section-header">Weekly Price Prediction</div>', unsafe_allow_html=True)
+        if _need_recompute:
+            with st.spinner("Computing week-by-week predictions…"):
+                n_weeks_int = int(weekly_n_weeks)
+                N_sim_int   = int(N_sim)
+                if "GBM" in model:
+                    wdf = run_weekly_gbm(S0, mu, sigma, n_weeks_int, N_sim_int, seed + 99)
+                else:
+                    wdf = run_weekly_ou(S0, kappa, theta, sigma, n_weeks_int, N_sim_int, seed + 99)
+                st.session_state["wdf"]           = wdf
+                st.session_state["wdf_cache_key"] = _wdf_key
+        else:
+            # Reuse cached result — no simulation needed
+            wdf = st.session_state["wdf"]
+            n_weeks_int = int(weekly_n_weeks)
+            N_sim_int   = int(N_sim)
 
-    w1, w2, w3, w4, w5 = st.columns(5)
-    w1.metric("Week 1 Forecast",      f"₱{bar_vals[0]:,.0f}",  f"{(bar_vals[0]/S0-1)*100:+.1f}% vs spot")
-    mid_idx = min(n_weeks_int // 2, n_weeks_int - 1)
-    w2.metric(f"Week {mid_idx+1} Forecast", f"₱{bar_vals[mid_idx]:,.0f}", f"{(bar_vals[mid_idx]/S0-1)*100:+.1f}% vs spot")
-    w3.metric(f"Week {n_weeks_int} Forecast", f"₱{bar_vals[-1]:,.0f}", f"{(bar_vals[-1]/S0-1)*100:+.1f}% vs spot")
-    weeks_below = int(np.sum(bar_vals <= breakeven))
-    w4.metric("Weeks Below Break-even", f"{weeks_below} / {n_weeks_int}")
-    peak_wk = int(np.argmax(bar_vals)) + 1
-    w5.metric("Peak Forecast Week", f"Week {peak_wk}", f"₱{bar_vals[peak_wk-1]:,.0f}")
+        bar_col   = "median" if weekly_display == "Median (P50)" else "mean"
+        bar_label = "Median" if weekly_display == "Median (P50)" else "Mean"
+        if weekly_interval == "P05–P95 (90%)":
+            lo_col, hi_col = "p05", "p95"
+            int_label = "P05–P95"
+        else:
+            lo_col, hi_col = "p25", "p75"
+            int_label = "P25–P75"
 
-    st.markdown("")
-    st.markdown(
-        f'<span class="info-pill" style="background:#2d1a1a;color:{RED_CLR}">🔴 At / below break-even</span>'
-        f'<span class="info-pill" style="background:#2b2000;color:{AMBER}">🟡 Within 5% of break-even</span>'
-        f'<span class="info-pill" style="background:#122d1e;color:{GREEN_OK}">🟢 Above break-even +5%</span>'
-        f'<span class="info-pill">Error bars: {int_label}</span>',
-        unsafe_allow_html=True
-    )
-    st.markdown("")
+        bar_vals = wdf[bar_col].values
+        lo_vals  = wdf[lo_col].values
+        hi_vals  = wdf[hi_col].values
+        weeks    = wdf["week"].values
 
-    fig_w = go.Figure()
-    fig_w.add_trace(go.Scatter(
-        x=np.concatenate([weeks, weeks[::-1]]),
-        y=np.concatenate([hi_vals, lo_vals[::-1]]),
-        fill="toself",
-        fillcolor="rgba(74,159,181,0.12)",
-        line_color="rgba(0,0,0,0)",
-        name=f"{int_label} band",
-        hoverinfo="skip",
-    ))
-    fig_w.add_trace(go.Bar(
-        x=weeks,
-        y=bar_vals,
-        name=f"{bar_label} Price",
-        marker_color=colors,
-        marker_line_color="rgba(0,0,0,0)",
-        opacity=0.85,
-        error_y=dict(
-            type="data",
-            symmetric=False,
-            array=err_plus,
-            arrayminus=err_minus,
-            color="#5a7a90",
-            thickness=1.2,
-            width=3,
-        ),
-        customdata=np.stack([lo_vals, hi_vals, wdf["p05"].values, wdf["p95"].values,
-                             wdf["mean"].values, wdf["median"].values], axis=-1),
-        hovertemplate=(
-            "<b>Week %{x}</b><br>"
-            f"{bar_label}: ₱%{{y:,.0f}}<br>"
-            f"{int_label} Low: ₱%{{customdata[0]:,.0f}}<br>"
-            f"{int_label} High: ₱%{{customdata[1]:,.0f}}<br>"
-            "P05: ₱%{customdata[2]:,.0f}<br>"
-            "P95: ₱%{customdata[3]:,.0f}<br>"
-            "Mean: ₱%{customdata[4]:,.0f}<br>"
-            "Median: ₱%{customdata[5]:,.0f}<extra></extra>"
-        ),
-    ))
-    fig_w.add_hline(
-        y=breakeven,
-        line_dash="dash", line_color=RED_CLR, line_width=1.5,
-        annotation_text=f"Break-even ₱{breakeven:,.0f}",
-        annotation_font_color=RED_CLR,
-        annotation_position="top right",
-    )
-    fig_w.add_hline(
-        y=S0,
-        line_dash="dot", line_color=GOLD, line_width=1,
-        annotation_text=f"Spot ₱{S0:,.0f}",
-        annotation_font_color=GOLD,
-        annotation_position="bottom right",
-    )
-    if "Mean-Reverting" in model:
+        err_plus  = hi_vals - bar_vals
+        err_minus = bar_vals - lo_vals
+
+        def bar_color(price, be):
+            if price <= be:
+                return RED_CLR
+            elif price <= be * 1.05:
+                return AMBER
+            else:
+                return GREEN_OK
+
+        colors = [bar_color(v, breakeven) for v in bar_vals]
+
+        st.markdown('<div class="section-header">Weekly Price Prediction</div>', unsafe_allow_html=True)
+
+        w1, w2, w3, w4, w5 = st.columns(5)
+        w1.metric("Week 1 Forecast",      f"₱{bar_vals[0]:,.0f}",  f"{(bar_vals[0]/S0-1)*100:+.1f}% vs spot")
+        mid_idx = min(n_weeks_int // 2, n_weeks_int - 1)
+        w2.metric(f"Week {mid_idx+1} Forecast", f"₱{bar_vals[mid_idx]:,.0f}", f"{(bar_vals[mid_idx]/S0-1)*100:+.1f}% vs spot")
+        w3.metric(f"Week {n_weeks_int} Forecast", f"₱{bar_vals[-1]:,.0f}", f"{(bar_vals[-1]/S0-1)*100:+.1f}% vs spot")
+        weeks_below = int(np.sum(bar_vals <= breakeven))
+        w4.metric("Weeks Below Break-even", f"{weeks_below} / {n_weeks_int}")
+        peak_wk = int(np.argmax(bar_vals)) + 1
+        w5.metric("Peak Forecast Week", f"Week {peak_wk}", f"₱{bar_vals[peak_wk-1]:,.0f}")
+
+        st.markdown("")
+        st.markdown(
+            f'<span class="info-pill" style="background:#2d1a1a;color:{RED_CLR}">🔴 At / below break-even</span>'
+            f'<span class="info-pill" style="background:#2b2000;color:{AMBER}">🟡 Within 5% of break-even</span>'
+            f'<span class="info-pill" style="background:#122d1e;color:{GREEN_OK}">🟢 Above break-even +5%</span>'
+            f'<span class="info-pill">Error bars: {int_label}</span>',
+            unsafe_allow_html=True
+        )
+        st.markdown("")
+
+        fig_w = go.Figure()
+        fig_w.add_trace(go.Scatter(
+            x=np.concatenate([weeks, weeks[::-1]]),
+            y=np.concatenate([hi_vals, lo_vals[::-1]]),
+            fill="toself",
+            fillcolor="rgba(74,159,181,0.12)",
+            line_color="rgba(0,0,0,0)",
+            name=f"{int_label} band",
+            hoverinfo="skip",
+        ))
+        fig_w.add_trace(go.Bar(
+            x=weeks,
+            y=bar_vals,
+            name=f"{bar_label} Price",
+            marker_color=colors,
+            marker_line_color="rgba(0,0,0,0)",
+            opacity=0.85,
+            error_y=dict(
+                type="data",
+                symmetric=False,
+                array=err_plus,
+                arrayminus=err_minus,
+                color="#5a7a90",
+                thickness=1.2,
+                width=3,
+            ),
+            customdata=np.stack([lo_vals, hi_vals, wdf["p05"].values, wdf["p95"].values,
+                                 wdf["mean"].values, wdf["median"].values], axis=-1),
+            hovertemplate=(
+                "<b>Week %{x}</b><br>"
+                f"{bar_label}: ₱%{{y:,.0f}}<br>"
+                f"{int_label} Low: ₱%{{customdata[0]:,.0f}}<br>"
+                f"{int_label} High: ₱%{{customdata[1]:,.0f}}<br>"
+                "P05: ₱%{customdata[2]:,.0f}<br>"
+                "P95: ₱%{customdata[3]:,.0f}<br>"
+                "Mean: ₱%{customdata[4]:,.0f}<br>"
+                "Median: ₱%{customdata[5]:,.0f}<extra></extra>"
+            ),
+        ))
         fig_w.add_hline(
-            y=theta,
-            line_dash="dashdot", line_color="#a78bfa", line_width=1,
-            annotation_text=f"Long-run mean θ ₱{theta:,.0f}",
-            annotation_font_color="#a78bfa",
-            annotation_position="top left",
+            y=breakeven,
+            line_dash="dash", line_color=RED_CLR, line_width=1.5,
+            annotation_text=f"Break-even ₱{breakeven:,.0f}",
+            annotation_font_color=RED_CLR,
+            annotation_position="top right",
         )
-    fig_w.update_layout(
-        paper_bgcolor=DARK_BG,
-        plot_bgcolor=DARK_BG,
-        font_color=TEXT_CLR,
-        font_family="DM Sans, sans-serif",
-        xaxis=dict(
-            title="Week from Today",
-            gridcolor=GRID_CLR,
-            zeroline=False,
-            tickmode="linear",
-            tick0=1,
-            dtick=max(1, n_weeks_int // 13),
-            tickfont=dict(size=11),
-        ),
-        yaxis=dict(
-            title="Predicted Price (₱/Lkg)",
-            gridcolor=GRID_CLR,
-            zeroline=False,
-            tickprefix="₱",
-            tickformat=",",
-        ),
-        legend=dict(
-            bgcolor=DARK_BG,
-            bordercolor=GRID_CLR,
-            borderwidth=1,
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1,
-        ),
-        bargap=0.25,
-        margin=dict(t=60, b=60, l=70, r=30),
-        height=500,
-        title=dict(
-            text=f"Week-by-Week {bar_label} Sugar Price Forecast · {n_weeks_int} Weeks · {model}",
-            font=dict(family="DM Serif Display, serif", size=16, color="#8ab4cc"),
-            x=0.0,
-            xanchor="left",
-        ),
-    )
-    st.plotly_chart(fig_w, width='stretch')
-
-    trend_pct = (bar_vals[-1] / S0 - 1) * 100
-    trend_dir = "📈 upward" if trend_pct > 1 else ("📉 downward" if trend_pct < -1 else "➡️ flat")
-    st.caption(
-        f"Overall trend over {n_weeks_int} weeks: **{trend_dir}** · "
-        f"Start ₱{S0:,.0f} → Week {n_weeks_int} {bar_label} ₱{bar_vals[-1]:,.0f} "
-        f"({trend_pct:+.1f}%) · "
-        f"Error bars show {int_label} confidence interval · "
-        f"Based on {N_sim_int:,} Monte Carlo paths."
-    )
-
-    with st.expander("📋 View detailed weekly forecast table"):
-        tbl_rows = []
-        for _, row in wdf.iterrows():
-            wk   = int(row["week"])
-            med  = row["median"]
-            mn   = row["mean"]
-            p5   = row["p05"]
-            p25r = row["p25"]
-            p75r = row["p75"]
-            p95r = row["p95"]
-            chg  = (med / S0 - 1) * 100
-            risk_flag = "❌ Below" if med <= breakeven else ("⚠️ Near" if med <= breakeven * 1.05 else "✅ Safe")
-            tbl_rows.append({
-                "Week": wk,
-                "Median (₱)": f"₱{med:,.0f}",
-                "Mean (₱)": f"₱{mn:,.0f}",
-                "P05 (₱)": f"₱{p5:,.0f}",
-                "P25 (₱)": f"₱{p25r:,.0f}",
-                "P75 (₱)": f"₱{p75r:,.0f}",
-                "P95 (₱)": f"₱{p95r:,.0f}",
-                "vs Spot": f"{chg:+.1f}%",
-                "Break-even Risk": risk_flag,
-            })
-        tbl_df = pd.DataFrame(tbl_rows)
-        st.dataframe(tbl_df, width='stretch', hide_index=True, height=400)
-        st.download_button(
-            "⬇️ Download Weekly Forecast CSV",
-            data=tbl_df.to_csv(index=False),
-            file_name="sugar_weekly_forecast.csv",
-            mime="text/csv",
-            width='content',
+        fig_w.add_hline(
+            y=S0,
+            line_dash="dot", line_color=GOLD, line_width=1,
+            annotation_text=f"Spot ₱{S0:,.0f}",
+            annotation_font_color=GOLD,
+            annotation_position="bottom right",
         )
+        if "Mean-Reverting" in model:
+            fig_w.add_hline(
+                y=theta,
+                line_dash="dashdot", line_color="#a78bfa", line_width=1,
+                annotation_text=f"Long-run mean θ ₱{theta:,.0f}",
+                annotation_font_color="#a78bfa",
+                annotation_position="top left",
+            )
+        fig_w.update_layout(
+            paper_bgcolor=DARK_BG,
+            plot_bgcolor=DARK_BG,
+            font_color=TEXT_CLR,
+            font_family="DM Sans, sans-serif",
+            xaxis=dict(
+                title="Week from Today",
+                gridcolor=GRID_CLR,
+                zeroline=False,
+                tickmode="linear",
+                tick0=1,
+                dtick=max(1, n_weeks_int // 13),
+                tickfont=dict(size=11),
+            ),
+            yaxis=dict(
+                title="Predicted Price (₱/Lkg)",
+                gridcolor=GRID_CLR,
+                zeroline=False,
+                tickprefix="₱",
+                tickformat=",",
+            ),
+            legend=dict(
+                bgcolor=DARK_BG,
+                bordercolor=GRID_CLR,
+                borderwidth=1,
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1,
+            ),
+            bargap=0.25,
+            margin=dict(t=60, b=60, l=70, r=30),
+            height=500,
+            title=dict(
+                text=f"Week-by-Week {bar_label} Sugar Price Forecast · {n_weeks_int} Weeks · {model}",
+                font=dict(family="DM Serif Display, serif", size=16, color="#8ab4cc"),
+                x=0.0,
+                xanchor="left",
+            ),
+        )
+        st.plotly_chart(fig_w, width='stretch')
+
+        trend_pct = (bar_vals[-1] / S0 - 1) * 100
+        trend_dir = "📈 upward" if trend_pct > 1 else ("📉 downward" if trend_pct < -1 else "➡️ flat")
+        st.caption(
+            f"Overall trend over {n_weeks_int} weeks: **{trend_dir}** · "
+            f"Start ₱{S0:,.0f} → Week {n_weeks_int} {bar_label} ₱{bar_vals[-1]:,.0f} "
+            f"({trend_pct:+.1f}%) · "
+            f"Error bars show {int_label} confidence interval · "
+            f"Based on {N_sim_int:,} Monte Carlo paths."
+        )
+
+        with st.expander("📋 View detailed weekly forecast table"):
+            tbl_rows = []
+            for _, row in wdf.iterrows():
+                wk   = int(row["week"])
+                med  = row["median"]
+                mn   = row["mean"]
+                p5   = row["p05"]
+                p25r = row["p25"]
+                p75r = row["p75"]
+                p95r = row["p95"]
+                chg  = (med / S0 - 1) * 100
+                risk_flag = "❌ Below" if med <= breakeven else ("⚠️ Near" if med <= breakeven * 1.05 else "✅ Safe")
+                tbl_rows.append({
+                    "Week": wk,
+                    "Median (₱)": f"₱{med:,.0f}",
+                    "Mean (₱)": f"₱{mn:,.0f}",
+                    "P05 (₱)": f"₱{p5:,.0f}",
+                    "P25 (₱)": f"₱{p25r:,.0f}",
+                    "P75 (₱)": f"₱{p75r:,.0f}",
+                    "P95 (₱)": f"₱{p95r:,.0f}",
+                    "vs Spot": f"{chg:+.1f}%",
+                    "Break-even Risk": risk_flag,
+                })
+            tbl_df = pd.DataFrame(tbl_rows)
+            st.dataframe(tbl_df, width='stretch', hide_index=True, height=400)
+            st.download_button(
+                "⬇️ Download Weekly Forecast CSV",
+                data=tbl_df.to_csv(index=False),
+                file_name="sugar_weekly_forecast.csv",
+                mime="text/csv",
+                width='content',
+            )
 
 
 # ════════════════════════════════════════════════════════════════════════════════
 # TAB 4 — Saved Runs
+# (always renders — no st.stop() above this point in the tab block)
 # ════════════════════════════════════════════════════════════════════════════════
 with tab_saved:
     st.markdown('<div class="section-header">Your Saved Simulation Runs</div>', unsafe_allow_html=True)
@@ -1717,7 +1733,6 @@ with tab_saved:
         if not runs:
             st.info("No saved runs yet. Run a simulation and click **💾 Save This Run** to save it here.")
         else:
-            # FIX DB-LIMIT: inform user that only the 50 most recent runs are shown
             st.caption(
                 f"{len(runs)} saved run{'s' if len(runs) != 1 else ''} shown "
                 f"(most recent 50) · {_user.email}"
@@ -1780,5 +1795,5 @@ st.caption(
     "Mill-gate raw sugar price model. "
     "GBM assumes lognormally distributed returns. "
     "Mean-Reverting uses an Ornstein–Uhlenbeck process on log-prices. "
-    "Results are probabilistic estimates, not forecasts." 
+    "Results are probabilistic estimates, not forecasts."
 )
