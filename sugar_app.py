@@ -214,7 +214,7 @@ def render_auth_page():
         st.markdown("</div>", unsafe_allow_html=True)
         st.markdown("""
         <div style="text-align:center; margin-top:1.2rem; font-size:0.7rem;
-             color:#2a4a32; font-family:'Space Mono',monospace; letter-spacing:0.06em;">
+             color:#ccfa34; font-family:'Space Mono',monospace; letter-spacing:0.06em;">
           Mill-gate raw sugar · Philippines · Probabilistic estimates only
         </div>
         """, unsafe_allow_html=True)
