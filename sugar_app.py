@@ -1775,12 +1775,10 @@ with tab_saved:
 
 
 # ── Footer ─────────────────────────────────────────────────────────────────────
-st.markdown("---
- <div style="font-family:'Playfair Display',serif; font-size:1.3rem; font-weight:700;
-         color:#ccfa34; margin-bottom:0.2rem; line-height:1.2;">")
+st.markdown("---")
 st.caption(
     "Mill-gate raw sugar price model. "
     "GBM assumes lognormally distributed returns. "
     "Mean-Reverting uses an Ornstein–Uhlenbeck process on log-prices. "
-    "Results are probabilistic estimates, not forecasts." '</div>'
+    "Results are probabilistic estimates, not forecasts." 
 )
