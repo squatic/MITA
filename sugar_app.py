@@ -241,7 +241,7 @@ def render_auth_page():
         <!-- FIX ACCESSIBILITY: footer disclaimer uses theme-safe #3a6b45 instead of #ccfa34 -->
         <div style="text-align:center; margin-top:1.2rem; font-size:0.7rem;
              color:#3a6b45; font-family:'Space Mono',monospace; letter-spacing:0.06em;">
-          Mill-gate raw sugar · Philippines · Probabilistic estimates only
+          Mill-gate Sugar · Philippines · Probabilistic estimates only
         </div>
         """, unsafe_allow_html=True)
 
