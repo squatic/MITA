@@ -1918,7 +1918,7 @@ with tab_saved:
 # ── Footer ─────────────────────────────────────────────────────────────────────
 st.markdown("---")
 st.markdown(
-    '<p style="color:#cafc03; font-size:0.8rem;">'
+    '<p style="color:#ffffff; font-size:0.8rem;">'
     "Mill-gate raw sugar price model. "
     "GBM assumes lognormally distributed returns. "
     "Mean-Reverting uses an Ornstein–Uhlenbeck process on log-prices (exact solution). "
