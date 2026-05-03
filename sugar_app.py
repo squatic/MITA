@@ -1,7 +1,7 @@
 """
 Sugar Price Monte Carlo Risk Model — with integrated Parameter Estimator
 Run with: streamlit run sugar_app.py
-Requires: pip install streamlit plotly numpy scipy matplotlib pandas supabase
+Requires: conda install streamlit plotly numpy scipy matplotlib pandas supabase json os
 """
 import streamlit as st
 import numpy as np
@@ -149,7 +149,7 @@ def render_auth_page():
       <div style="font-size:4rem; margin-bottom:1rem; filter: drop-shadow(0 0 30px rgba(52,200,80,0.5));">🍬</div>
       <div style="font-family:'Playfair Display',serif; font-size:2.2rem; font-weight:700;
            color:#e8dcc8; letter-spacing:-0.02em; margin-bottom:0.4rem;">
-        Sugar Price Risk Model
+        Montecarlo Risk Model | Price Prediction
       </div>
       <!-- FIX ACCESSIBILITY: restored #3a6b45 (theme-safe green) instead of #ccfa34 (fails light mode) -->
       <div style="font-family:'Space Mono',monospace; font-size:0.72rem; color:#3a6b45;
@@ -230,7 +230,7 @@ def render_auth_page():
 
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Sugar Price Prediction and Risk Model",
+    page_title="Sugar Pricing Forecasting",
     page_icon="🍬",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -769,7 +769,7 @@ with st.sidebar:
     <div style="font-family:'Playfair Display',serif; font-size:1.3rem; font-weight:700;
          color:#ccfa34; margin-bottom:0.2rem; line-height:1.2;">
       🍬 Sugar Price<br><span style="font-size:0.9rem;color:#ccfa34;font-family:'Space Mono',monospace;
-      font-style:normal;font-weight:400;letter-spacing:0.05em;">Risk Model | Price Prediction</span>
+      font-style:normal;font-weight:400;letter-spacing:0.05em;">Montecarlo Risk Model | Price Prediction</span>
     </div>
     """, unsafe_allow_html=True)
     st.markdown(
@@ -1055,8 +1055,8 @@ with st.sidebar:
 
 # ── Title ──────────────────────────────────────────────────────────────────────
 st.markdown('''
-<div class="page-title">🍬 Sugar Price Prediction & Monte Carlo Risk Model </div>
-<div class="page-subtitle">Risk Model | Price Prediction</div>
+<div class="page-title">🍬 Sugar Priing Forecasting </div>
+<div class="page-subtitle">Montecarlo Risk Model | Price Prediction</div>
 ''', unsafe_allow_html=True)
 col_model, col_spot, col_horizon = st.columns(3)
 with col_model:
