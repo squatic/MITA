@@ -169,7 +169,7 @@ def render_auth_page():
       <!-- FIX ACCESSIBILITY: restored #3a6b45 (theme-safe green) instead of #ccfa34 (fails light mode) -->
       <div style="font-family:'Space Mono',monospace; font-size:0.72rem; color:#3a6b45;
            letter-spacing:0.2em; text-transform:uppercase; margin-bottom:0.5rem;">
-        Monte Carlo · Ornstein–Uhlenbeck · GBM Analytics
+        Montecarlo Risk Model | Price Prediction
       </div>
       <div style="width:60px; height:2px; background:linear-gradient(90deg,transparent,#d4a843,transparent); margin:0.5rem auto;"></div>
     </div>
@@ -745,7 +745,7 @@ with st.sidebar:
     <div style="font-family:'Playfair Display',serif; font-size:1.3rem; font-weight:700;
          color:#ccfa34; margin-bottom:0.2rem; line-height:1.2;">
       🍬 Sugar Price<br><span style="font-size:0.9rem;color:#ccfa34;font-family:'Space Mono',monospace;
-      font-style:normal;font-weight:400;letter-spacing:0.05em;">Risk Model | Price Prediction</span>
+      font-style:normal;font-weight:400;letter-spacing:0.05em;">Montecarlo Risk Model | Price Prediction</span>
     </div>
     """, unsafe_allow_html=True)
     st.markdown(
@@ -1032,7 +1032,7 @@ with st.sidebar:
 # ── Title ──────────────────────────────────────────────────────────────────────
 st.markdown('''
 <div class="page-title">🍬 Sugar Price Prediction & Monte Carlo Risk Model </div>
-<div class="page-subtitle">Risk Model | Price Prediction</div>
+<div class="page-subtitle">Montecarlo Risk Model | Price Prediction</div>
 ''', unsafe_allow_html=True)
 col_model, col_spot, col_horizon = st.columns(3)
 with col_model:
