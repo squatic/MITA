@@ -783,11 +783,7 @@ with st.sidebar:
         st.rerun()
     st.markdown("---")
 
-    st.markdown("
-    '<p style="color:#cafc03;">'
-    ### Model Setup"
-    "</p>",
-    unsafe_allow_html=True,)
+    st.markdown("### Model Setup")
     model = st.selectbox(
         "Price model",
         ["GBM (Lognormal)", "Mean-Reverting"],
