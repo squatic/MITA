@@ -1100,7 +1100,13 @@ tab_est, tab_sim, tab_weekly, tab_saved = st.tabs([
 # ════════════════════════════════════════════════════════════════════════════════
 with tab_est:
     if df_raw is None or price_col is None:
-        st.markdown("### Upload a CSV in the sidebar to estimate model parameters.")
+st.markdown("---")
+st.markdown(
+    '<p style="color:#ffffff; font-size:0.8rem;">'
+    "### Upload a CSV in the sidebar to estimate model parameters."
+    "</p>",
+    unsafe_allow_html=True,)
+
         sample = pd.DataFrame({
             "date":  ["2024-01", "2024-02", "2024-03", "2024-04", "2024-05"],
             "price": [2450, 2510, 2480, 2530, 2495]
