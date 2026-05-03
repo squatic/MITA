@@ -1,7 +1,7 @@
 """
 Sugar Price Monte Carlo Risk Model — with integrated Parameter Estimator
 Run with: streamlit run sugar_app.py
-Requires: pip install streamlit plotly numpy scipy matplotlib pandas supabase streamlit-cookies-controller
+Requires: pip install streamlit plotly numpy scipy matplotlib pandas supabase
 """
 import streamlit as st
 import numpy as np
@@ -13,15 +13,6 @@ from scipy import stats
 import json
 import os
 from datetime import datetime
-
-# ── Cookie Controller (persists login across browser refreshes) ────────────────
-try:
-    from streamlit_cookies_controller import CookieController
-    _cookie_ctrl = CookieController()
-    COOKIES_OK = True
-except ImportError:
-    _cookie_ctrl = None
-    COOKIES_OK = False
 
 # ── Supabase Client ────────────────────────────────────────────────────────────
 try:
@@ -53,13 +44,8 @@ def auth_logout():
     st.session_state["user"]          = None
     st.session_state["access_token"]  = None
     st.session_state["refresh_token"] = None
-    # Clear persisted cookies so refresh does not auto-login
-    if COOKIES_OK and _cookie_ctrl:
-        try:
-            _cookie_ctrl.remove("sugar_access_token")
-            _cookie_ctrl.remove("sugar_refresh_token")
-        except Exception:
-            pass
+    # Clear tokens from URL so refresh doesn't auto-login
+    st.query_params.clear()
 
 def get_current_user():
     return st.session_state.get("user", None)
@@ -161,7 +147,7 @@ def render_auth_page():
       display: flex; flex-direction: column; align-items: center; justify-content: center;
       padding: 3rem 1rem 2rem; text-align: center;
     ">
-      <div style="font-size:4rem; margin-bottom:1rem; filter: drop-shadow(0 0 30px rgba(52,200,80,0.5));">🍬</div>
+      <div style="font-size:4rem; margin-bottom:1rem; filter: drop-shadow(0 0 30px rgba(52,200,80,0.5));">🎋</div>
       <div style="font-family:'Playfair Display',serif; font-size:2.2rem; font-weight:700;
            color:#e8dcc8; letter-spacing:-0.02em; margin-bottom:0.4rem;">
         Sugar Price Risk Model
@@ -169,7 +155,7 @@ def render_auth_page():
       <!-- FIX ACCESSIBILITY: restored #3a6b45 (theme-safe green) instead of #ccfa34 (fails light mode) -->
       <div style="font-family:'Space Mono',monospace; font-size:0.72rem; color:#3a6b45;
            letter-spacing:0.2em; text-transform:uppercase; margin-bottom:0.5rem;">
-        Montecarlo Risk Model | Price Prediction
+        Monte Carlo · Ornstein–Uhlenbeck · GBM Analytics
       </div>
       <div style="width:60px; height:2px; background:linear-gradient(90deg,transparent,#d4a843,transparent); margin:0.5rem auto;"></div>
     </div>
@@ -201,13 +187,9 @@ def render_auth_page():
                         st.session_state["access_token"]  = res.session.access_token
                         st.session_state["refresh_token"] = res.session.refresh_token
                         supabase.auth.set_session(res.session.access_token, res.session.refresh_token)
-                        # Persist tokens in browser cookies so refresh doesn't log out
-                        if COOKIES_OK and _cookie_ctrl:
-                            try:
-                                _cookie_ctrl.set("sugar_access_token",  res.session.access_token,  max_age=60*60*24*7)
-                                _cookie_ctrl.set("sugar_refresh_token", res.session.refresh_token, max_age=60*60*24*7)
-                            except Exception:
-                                pass
+                        # Persist tokens in URL so they survive browser refresh
+                        st.query_params["at"] = res.session.access_token
+                        st.query_params["rt"] = res.session.refresh_token
                         st.rerun()
                     except Exception as e:
                         st.error(f"Login failed: {e}")
@@ -241,7 +223,7 @@ def render_auth_page():
         <!-- FIX ACCESSIBILITY: footer disclaimer uses theme-safe #3a6b45 instead of #ccfa34 -->
         <div style="text-align:center; margin-top:1.2rem; font-size:0.7rem;
              color:#3a6b45; font-family:'Space Mono',monospace; letter-spacing:0.06em;">
-          Mill-gate Sugar · Philippines · Probabilistic estimates only
+          Mill-gate raw sugar · Philippines · Probabilistic estimates only
         </div>
         """, unsafe_allow_html=True)
 
@@ -261,24 +243,24 @@ if "access_token" not in st.session_state:
 if "refresh_token" not in st.session_state:
     st.session_state["refresh_token"] = None
 
-# ── Restore session from cookies after browser refresh ─────────────────────────
-if st.session_state["user"] is None and COOKIES_OK and _cookie_ctrl and SUPABASE_OK:
-    try:
-        _saved_access  = _cookie_ctrl.get("sugar_access_token")
-        _saved_refresh = _cookie_ctrl.get("sugar_refresh_token")
-        if _saved_access and _saved_refresh:
-            _restored = supabase.auth.set_session(_saved_access, _saved_refresh)
+# ── Restore session from URL query params after browser refresh ────────────────
+# st.query_params are available immediately on every run, so this works on refresh.
+if st.session_state["user"] is None and SUPABASE_OK:
+    _qp_access  = st.query_params.get("at")
+    _qp_refresh = st.query_params.get("rt")
+    if _qp_access and _qp_refresh:
+        try:
+            _restored = supabase.auth.set_session(_qp_access, _qp_refresh)
             if _restored and _restored.user:
                 st.session_state["user"]          = _restored.user
                 st.session_state["access_token"]  = _restored.session.access_token
                 st.session_state["refresh_token"] = _restored.session.refresh_token
-    except Exception:
-        # Tokens expired or invalid — clear cookies and show login
-        try:
-            _cookie_ctrl.remove("sugar_access_token")
-            _cookie_ctrl.remove("sugar_refresh_token")
+                # Refresh tokens in URL in case Supabase rotated them
+                st.query_params["at"] = _restored.session.access_token
+                st.query_params["rt"] = _restored.session.refresh_token
         except Exception:
-            pass
+            # Tokens expired or invalid — clear URL and show login
+            st.query_params.clear()
 
 _user = get_current_user()
 if _user is None:
@@ -745,7 +727,7 @@ with st.sidebar:
     <div style="font-family:'Playfair Display',serif; font-size:1.3rem; font-weight:700;
          color:#ccfa34; margin-bottom:0.2rem; line-height:1.2;">
       🍬 Sugar Price<br><span style="font-size:0.9rem;color:#ccfa34;font-family:'Space Mono',monospace;
-      font-style:normal;font-weight:400;letter-spacing:0.05em;">Montecarlo Risk Model | Price Prediction</span>
+      font-style:normal;font-weight:400;letter-spacing:0.05em;">Risk Model | Price Prediction</span>
     </div>
     """, unsafe_allow_html=True)
     st.markdown(
@@ -1032,7 +1014,7 @@ with st.sidebar:
 # ── Title ──────────────────────────────────────────────────────────────────────
 st.markdown('''
 <div class="page-title">🍬 Sugar Price Prediction & Monte Carlo Risk Model </div>
-<div class="page-subtitle">Montecarlo Risk Model | Price Prediction</div>
+<div class="page-subtitle">Risk Model | Price Prediction</div>
 ''', unsafe_allow_html=True)
 col_model, col_spot, col_horizon = st.columns(3)
 with col_model:
