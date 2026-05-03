@@ -6,3 +6,4 @@ scipy
 pandas
 matplotlib
 anthropic
+streamlit-cookies-controller
