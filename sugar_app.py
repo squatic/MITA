@@ -146,7 +146,7 @@ def render_auth_page():
       display: flex; flex-direction: column; align-items: center; justify-content: center;
       padding: 3rem 1rem 2rem; text-align: center;
     ">
-      <div style="font-size:4rem; margin-bottom:1rem; filter: drop-shadow(0 0 30px rgba(52,200,80,0.5));">🎋</div>
+      <div style="font-size:4rem; margin-bottom:1rem; filter: drop-shadow(0 0 30px rgba(52,200,80,0.5));">🍬</div>
       <div style="font-family:'Playfair Display',serif; font-size:2.2rem; font-weight:700;
            color:#e8dcc8; letter-spacing:-0.02em; margin-bottom:0.4rem;">
         Sugar Price Risk Model
@@ -154,7 +154,7 @@ def render_auth_page():
       <!-- FIX ACCESSIBILITY: restored #3a6b45 (theme-safe green) instead of #ccfa34 (fails light mode) -->
       <div style="font-family:'Space Mono',monospace; font-size:0.72rem; color:#3a6b45;
            letter-spacing:0.2em; text-transform:uppercase; margin-bottom:0.5rem;">
-        Monte Carlo · Ornstein–Uhlenbeck · GBM Analytics
+        Monte Carlo Risk Model | Sugar Price Prediction
       </div>
       <div style="width:60px; height:2px; background:linear-gradient(90deg,transparent,#d4a843,transparent); margin:0.5rem auto;"></div>
     </div>
@@ -223,7 +223,7 @@ def render_auth_page():
         <!-- FIX ACCESSIBILITY: footer disclaimer uses theme-safe #3a6b45 instead of #ccfa34 -->
         <div style="text-align:center; margin-top:1.2rem; font-size:0.7rem;
              color:#3a6b45; font-family:'Space Mono',monospace; letter-spacing:0.06em;">
-          Mill-gate raw sugar · Philippines · Probabilistic estimates only
+          Mill-gate Sugar · Philippines · Probabilistic estimates only
         </div>
         """, unsafe_allow_html=True)
 
