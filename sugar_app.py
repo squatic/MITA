@@ -161,10 +161,10 @@ def render_auth_page():
       display: flex; flex-direction: column; align-items: center; justify-content: center;
       padding: 3rem 1rem 2rem; text-align: center;
     ">
-      <div style="font-size:4rem; margin-bottom:1rem; filter: drop-shadow(0 0 30px rgba(52,200,80,0.5));"></div>
+      <div style="font-size:4rem; margin-bottom:1rem; filter: drop-shadow(0 0 30px rgba(52,200,80,0.5));">🍬</div>
       <div style="font-family:'Playfair Display',serif; font-size:2.2rem; font-weight:700;
            color:#e8dcc8; letter-spacing:-0.02em; margin-bottom:0.4rem;">
-        🍬 Sugar Price Risk Model
+        Sugar Price Risk Model
       </div>
       <!-- FIX ACCESSIBILITY: restored #3a6b45 (theme-safe green) instead of #ccfa34 (fails light mode) -->
       <div style="font-family:'Space Mono',monospace; font-size:0.72rem; color:#3a6b45;
