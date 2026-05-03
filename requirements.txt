@@ -7,3 +7,4 @@ pandas
 matplotlib
 anthropic
 streamlit-cookies-controller
+cryptography
