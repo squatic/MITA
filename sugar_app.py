@@ -302,7 +302,7 @@ if st.session_state["user"] is None and SUPABASE_OK:
 _user = get_current_user()
 if _user is None:
     render_auth_page()
-    st.stop()
+   st.error("…");
 
 _access_token  = st.session_state.get("access_token")
 _refresh_token = st.session_state.get("refresh_token")
