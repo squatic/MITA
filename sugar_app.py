@@ -10,8 +10,8 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import matplotlib.pyplot as plt
 from scipy import stats
-import json
-import os
+import jsonA
+import osA
 from datetime import datetime
 
 # ── Supabase Client ────────────────────────────────────────────────────────────
@@ -142,7 +142,7 @@ def render_auth_page():
       display: flex; flex-direction: column; align-items: center; justify-content: center;
       padding: 3rem 1rem 2rem; text-align: center;
     ">
-      <div style="font-size:4rem; margin-bottom:1rem; filter: drop-shadow(0 0 30px rgba(52,200,80,0.5));">🍬</div>
+      <div style="font-size:4rem; margin-bottom:1rem; filter: drop-shadow(0 0 30px rgba(52,200,80,0.5));">🎋</div>
       <div style="font-family:'Playfair Display',serif; font-size:2.2rem; font-weight:700;
            color:#e8dcc8; letter-spacing:-0.02em; margin-bottom:0.4rem;">
         Sugar Price Risk Model
@@ -1767,9 +1767,7 @@ with tab_saved:
 
                     st.markdown(
                         f"**Model:** {p.get('model','?')}  |  "
-                        n_sim = p.get('N_sim')
-                        sim_str = f"{n_sim:,}" if isinstance(n_sim, int) else "?"
-                        f"**Simulations:** {sim_str}"
+                        f"**Simulations:** {p.get('N_sim', '?'):,}  |  "
                         f"**Break-even:** ₱{p.get('breakeven', 0):,.0f}/Lkg  |  "
                         f"**Seed:** {p.get('seed','?')}"
                     )
