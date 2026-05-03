@@ -44,7 +44,10 @@ def auth_logout():
     st.session_state["user"]          = None
     st.session_state["access_token"]  = None
     st.session_state["refresh_token"] = None
-    # Clear tokens from URL so refresh doesn't auto-login
+    # Remove token from server-side store and clear the opaque URL param
+    _sid = st.query_params.get("sid")
+    if _sid:
+        st.session_state.get("_token_store", {}).pop(_sid, None)
     st.query_params.clear()
 
 def get_current_user():
@@ -147,7 +150,7 @@ def render_auth_page():
       display: flex; flex-direction: column; align-items: center; justify-content: center;
       padding: 3rem 1rem 2rem; text-align: center;
     ">
-      <div style="font-size:4rem; margin-bottom:1rem; filter: drop-shadow(0 0 30px rgba(52,200,80,0.5));">🍬</div>
+      <div style="font-size:4rem; margin-bottom:1rem; filter: drop-shadow(0 0 30px rgba(52,200,80,0.5));">🎋</div>
       <div style="font-family:'Playfair Display',serif; font-size:2.2rem; font-weight:700;
            color:#e8dcc8; letter-spacing:-0.02em; margin-bottom:0.4rem;">
         Sugar Price Risk Model
@@ -187,9 +190,9 @@ def render_auth_page():
                         st.session_state["access_token"]  = res.session.access_token
                         st.session_state["refresh_token"] = res.session.refresh_token
                         supabase.auth.set_session(res.session.access_token, res.session.refresh_token)
-                        # Persist tokens in URL so they survive browser refresh
-                        st.query_params["at"] = res.session.access_token
-                        st.query_params["rt"] = res.session.refresh_token
+                        # Store tokens server-side; put only an opaque ID in the URL
+                        _sid = _store_tokens(res.session.access_token, res.session.refresh_token)
+                        st.query_params["sid"] = _sid
                         st.rerun()
                     except Exception as e:
                         st.error(f"Login failed: {e}")
@@ -210,7 +213,7 @@ def render_auth_page():
                 else:
                     try:
                         res = auth_signup(email2, pw2)
-                        st.success("✅ Account created! Check your email to confirm, then sign in.")
+                        st.success("✅ Account created! Check your email for a confirmation link, then return here and **Sign In**.")
                     except Exception as e:
                         msg = str(e)
                         if "already registered" in msg.lower() or "already exists" in msg.lower():
@@ -236,6 +239,8 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+import hashlib, secrets as _secrets
+
 if "user" not in st.session_state:
     st.session_state["user"] = None
 if "access_token" not in st.session_state:
@@ -243,23 +248,57 @@ if "access_token" not in st.session_state:
 if "refresh_token" not in st.session_state:
     st.session_state["refresh_token"] = None
 
-# ── Restore session from URL query params after browser refresh ────────────────
-# st.query_params are available immediately on every run, so this works on refresh.
+# ── Session store: maps opaque session_id → {access_token, refresh_token} ─────
+# Tokens are never put in the URL — only a random opaque ID is.
+# The store lives in st.session_state so it's server-side only.
+if "_token_store" not in st.session_state:
+    st.session_state["_token_store"] = {}
+
+def _store_tokens(access: str, refresh: str) -> str:
+    """Save tokens server-side, return an opaque session ID for the URL."""
+    sid = _secrets.token_urlsafe(32)
+    st.session_state["_token_store"][sid] = {
+        "access_token":  access,
+        "refresh_token": refresh,
+    }
+    return sid
+
+def _load_tokens(sid: str) -> tuple:
+    """Return (access_token, refresh_token) for a session ID, or (None, None)."""
+    entry = st.session_state["_token_store"].get(sid)
+    if entry:
+        return entry["access_token"], entry["refresh_token"]
+    return None, None
+
+def _clear_token_store(sid: str):
+    st.session_state["_token_store"].pop(sid, None)
+
+# ── Restore session from URL query param (opaque session ID only) ──────────────
 if st.session_state["user"] is None and SUPABASE_OK:
-    _qp_access  = st.query_params.get("at")
-    _qp_refresh = st.query_params.get("rt")
-    if _qp_access and _qp_refresh:
-        try:
-            _restored = supabase.auth.set_session(_qp_access, _qp_refresh)
-            if _restored and _restored.user:
-                st.session_state["user"]          = _restored.user
-                st.session_state["access_token"]  = _restored.session.access_token
-                st.session_state["refresh_token"] = _restored.session.refresh_token
-                # Refresh tokens in URL in case Supabase rotated them
-                st.query_params["at"] = _restored.session.access_token
-                st.query_params["rt"] = _restored.session.refresh_token
-        except Exception:
-            # Tokens expired or invalid — clear URL and show login
+    _sid = st.query_params.get("sid")
+    if _sid:
+        _qp_access, _qp_refresh = _load_tokens(_sid)
+        if _qp_access and _qp_refresh:
+            try:
+                _restored = supabase.auth.set_session(_qp_access, _qp_refresh)
+                if _restored and _restored.user:
+                    st.session_state["user"]          = _restored.user
+                    st.session_state["access_token"]  = _restored.session.access_token
+                    st.session_state["refresh_token"] = _restored.session.refresh_token
+                    # Update store in case Supabase rotated the tokens
+                    st.session_state["_token_store"][_sid] = {
+                        "access_token":  _restored.session.access_token,
+                        "refresh_token": _restored.session.refresh_token,
+                    }
+                else:
+                    _clear_token_store(_sid)
+                    st.query_params.clear()
+            except Exception:
+                # Tokens expired or invalid — clear everything and show login
+                _clear_token_store(_sid)
+                st.query_params.clear()
+        else:
+            # sid in URL but no matching tokens (e.g. server restarted) — clear
             st.query_params.clear()
 
 _user = get_current_user()
@@ -620,15 +659,18 @@ def run_gbm_terminal(S0, mu, sigma, T, N, seed):
 
 
 def run_mean_revert_terminal(S0, kappa, theta, sigma, T, N, steps_per_year, seed):
-    rng   = np.random.default_rng(seed)
-    steps = max(1, int(T * steps_per_year))
-    dt    = T / steps
-    ln_S  = np.full(N, np.log(S0))
+    rng      = np.random.default_rng(seed)
+    # Cap steps to prevent server timeouts; OU converges quickly so this is safe
+    steps    = min(max(1, int(T * steps_per_year)), 520)
+    dt       = T / steps
     ln_theta = np.log(theta) - sigma**2 / (2 * kappa)
     sqrt_dt  = np.sqrt(dt)
-    for _ in range(steps):
-        Z    = rng.standard_normal(N)
-        ln_S += kappa * (ln_theta - ln_S) * dt + sigma * sqrt_dt * Z
+    # Vectorized: generate all noise at once (steps × N) then scan time axis
+    Z_all = rng.standard_normal((steps, N))
+    ln_S  = np.full(N, np.log(S0))
+    decay = kappa * dt
+    for t in range(steps):
+        ln_S += decay * (ln_theta - ln_S) + sigma * sqrt_dt * Z_all[t]
     return np.exp(ln_S)
 
 
@@ -1083,219 +1125,224 @@ with tab_est:
             dates_est = np.arange(len(prices_est))
 
         if len(prices_est) < 10:
-            st.error("Need at least 10 valid data points.")
-            st.stop()
+            st.error("Need at least 10 valid data points to estimate parameters.")
+            # Do NOT call st.stop() here — it would kill tabs 2-4.
+            # Use a flag to skip the rest of Tab 1 only.
+            _est_tab_abort = True
+        else:
+            _est_tab_abort = False
 
-        min_recommended = {"Daily": 500, "Weekly": 104, "Monthly": 36, "Yearly": 5}
-        min_rec = min_recommended[est_freq]
-        if len(prices_est) < min_rec:
-            st.warning(
-                f"⚠️ Only {len(prices_est)} observations detected. "
-                f"For {est_freq.lower()} data, at least {min_rec} rows are recommended."
-            )
+        if not _est_tab_abort:
+            min_recommended = {"Daily": 500, "Weekly": 104, "Monthly": 36, "Yearly": 5}
+            min_rec = min_recommended[est_freq]
+            if len(prices_est) < min_rec:
+                st.warning(
+                    f"⚠️ Only {len(prices_est)} observations detected. "
+                    f"For {est_freq.lower()} data, at least {min_rec} rows are recommended."
+                )
 
-        gbm = compute_gbm_params(prices_est, est_freq)
-        ou  = compute_ou_params(prices_est, est_freq)
-        N_ann = annualization_factor(est_freq)
-        dt    = dt_value(est_freq)
+            gbm = compute_gbm_params(prices_est, est_freq)
+            ou  = compute_ou_params(prices_est, est_freq)
+            N_ann = annualization_factor(est_freq)
+            dt    = dt_value(est_freq)
 
-        lr_est = gbm["log_returns"]
-        if len(lr_est) > 0:
-            z_scores_est = np.abs((lr_est - np.mean(lr_est)) / (np.std(lr_est) + 1e-12))
-            n_out_est = int(np.sum(z_scores_est > 4))
-            if n_out_est > 0:
+            lr_est = gbm["log_returns"]
+            if len(lr_est) > 0:
+                z_scores_est = np.abs((lr_est - np.mean(lr_est)) / (np.std(lr_est) + 1e-12))
+                n_out_est = int(np.sum(z_scores_est > 4))
+                if n_out_est > 0:
+                    st.markdown(
+                        f'<div class="warn-box">⚠️ {n_out_est} extreme return(s) detected '
+                        f'(|z| &gt; 4). These may inflate σ. Verify your source data.</div>',
+                        unsafe_allow_html=True
+                    )
+
+            if ou.get("_constant_series"):
                 st.markdown(
-                    f'<div class="warn-box">⚠️ {n_out_est} extreme return(s) detected '
-                    f'(|z| &gt; 4). These may inflate σ. Verify your source data.</div>',
+                    '<div class="warn-box">⚠️ <b>Constant price series detected.</b> All prices are identical, '
+                    'so OU parameters (κ, θ, σ) cannot be estimated. GBM parameters are shown but σ = 0. '
+                    'Please upload data with price variation.</div>',
                     unsafe_allow_html=True
                 )
 
-        if ou.get("_constant_series"):
-            st.markdown(
-                '<div class="warn-box">⚠️ <b>Constant price series detected.</b> All prices are identical, '
-                'so OU parameters (κ, θ, σ) cannot be estimated. GBM parameters are shown but σ = 0. '
-                'Please upload data with price variation.</div>',
-                unsafe_allow_html=True
-            )
+                st.markdown('<div class="est-section-header">📊 Price History</div>', unsafe_allow_html=True)
+            col_prev, col_chart = st.columns([1, 2])
 
-        st.markdown('<div class="est-section-header">📊 Price History</div>', unsafe_allow_html=True)
-        col_prev, col_chart = st.columns([1, 2])
+            with col_prev:
+                st.markdown(f"**{len(prices_est)} observations** · {est_freq} · `{price_col}`")
+                st.dataframe(df_raw[[price_col]].head(10), width='stretch')
 
-        with col_prev:
-            st.markdown(f"**{len(prices_est)} observations** · {est_freq} · `{price_col}`")
-            st.dataframe(df_raw[[price_col]].head(10), width='stretch')
+            with col_chart:
+                fig_px, ax_px = plt.subplots(figsize=(7, 3))
+                fig_px.patch.set_facecolor(DARK_BG)
+                ax_px.set_facecolor(DARK_BG)
+                ax_px.plot(dates_est, prices_est, color=TEAL, linewidth=1.5)
+                ax_px.axhline(ou["theta"], color=GOLD, linewidth=1, linestyle="--",
+                              label=f"Long-run mean θ: {ou['theta']:.1f}")
+                ax_px.set_ylabel(price_col, color="#9ca3af", fontsize=9)
+                ax_px.tick_params(colors="#6b7280", labelsize=8)
+                for sp in ax_px.spines.values(): sp.set_edgecolor(GRID_CLR)
+                ax_px.legend(fontsize=8, facecolor="#1a1d27", labelcolor="#9ca3af", edgecolor=GRID_CLR)
+                plt.tight_layout()
+                st.pyplot(fig_px)
+                plt.close()
 
-        with col_chart:
-            fig_px, ax_px = plt.subplots(figsize=(7, 3))
-            fig_px.patch.set_facecolor(DARK_BG)
-            ax_px.set_facecolor(DARK_BG)
-            ax_px.plot(dates_est, prices_est, color=TEAL, linewidth=1.5)
-            ax_px.axhline(ou["theta"], color=GOLD, linewidth=1, linestyle="--",
-                          label=f"Long-run mean θ: {ou['theta']:.1f}")
-            ax_px.set_ylabel(price_col, color="#9ca3af", fontsize=9)
-            ax_px.tick_params(colors="#6b7280", labelsize=8)
-            for sp in ax_px.spines.values(): sp.set_edgecolor(GRID_CLR)
-            ax_px.legend(fontsize=8, facecolor="#1a1d27", labelcolor="#9ca3af", edgecolor=GRID_CLR)
-            plt.tight_layout()
-            st.pyplot(fig_px)
-            plt.close()
+            st.markdown('<div class="est-section-header">📈 GBM Parameters</div>', unsafe_allow_html=True)
 
-        st.markdown('<div class="est-section-header">📈 GBM Parameters</div>', unsafe_allow_html=True)
+            g1, g2, g3, g4 = st.columns(4)
+            g1.metric("Annual Drift μ",        f"{gbm['mu_annual']*100:.2f}%")
+            g2.metric("Itô-Corrected Drift",   f"{gbm['mu_ito']*100:.2f}%")
+            g3.metric("Annual Volatility σ",   f"{gbm['sigma_annual']*100:.2f}%")
+            g4.metric(f"{est_freq} Volatility σ", f"{gbm['sigma_period']*100:.2f}%")
 
-        g1, g2, g3, g4 = st.columns(4)
-        g1.metric("Annual Drift μ",        f"{gbm['mu_annual']*100:.2f}%")
-        g2.metric("Itô-Corrected Drift",   f"{gbm['mu_ito']*100:.2f}%")
-        g3.metric("Annual Volatility σ",   f"{gbm['sigma_annual']*100:.2f}%")
-        g4.metric(f"{est_freq} Volatility σ", f"{gbm['sigma_period']*100:.2f}%")
-
-        with st.expander("Show GBM calculation detail"):
-            st.markdown(f"""
-| Step | Value |
-|---|---|
-| Observations (n) | {gbm['n_obs']} log returns |
-| Mean log return per {est_freq.lower()} | `{gbm['mu_period']:.6f}` |
-| Std dev log return per {est_freq.lower()} | `{gbm['sigma_period']:.6f}` |
-| Annualization factor (N) | `{N_ann}` |
-| **Annual Drift** = mean × N | `{gbm['mu_annual']:.6f}` → **{gbm['mu_annual']*100:.2f}%** |
-| **Annual Volatility** = std × √N | `{gbm['sigma_annual']:.6f}` → **{gbm['sigma_annual']*100:.2f}%** |
-| **Itô-Corrected Drift** = μ − σ²/2 | `{gbm['mu_ito']:.6f}` → **{gbm['mu_ito']*100:.2f}%** |
-""")
-
-        fig_lr, ax_lr = plt.subplots(figsize=(8, 2.8))
-        fig_lr.patch.set_facecolor(DARK_BG)
-        ax_lr.set_facecolor(DARK_BG)
-        ax_lr.hist(gbm['log_returns'], bins=25, color="#3b82f6", alpha=0.7, edgecolor="#1e293b")
-        ax_lr.axvline(gbm['mu_period'], color=GREEN_OK, linewidth=1.5, linestyle="--",
-                      label=f"Mean: {gbm['mu_period']:.4f}")
-        ax_lr.set_title("Distribution of Log Returns", color="#9ca3af", fontsize=10)
-        ax_lr.tick_params(colors="#6b7280", labelsize=8)
-        for sp in ax_lr.spines.values(): sp.set_edgecolor(GRID_CLR)
-        ax_lr.legend(fontsize=8, facecolor="#1a1d27", labelcolor="#9ca3af", edgecolor=GRID_CLR)
-        plt.tight_layout()
-        st.pyplot(fig_lr)
-        plt.close()
-
-        st.markdown('<div class="est-section-header">🔄 Ornstein-Uhlenbeck Parameters</div>', unsafe_allow_html=True)
-
-        if ou.get("_constant_series"):
-            st.markdown(
-                '<div class="warn-box">⚠️ Cannot display OU parameters — constant price series.</div>',
-                unsafe_allow_html=True
-            )
-        elif ou["k"] <= 0:
-            st.markdown(
-                '<div class="warn-box">⚠️ k ≤ 0 — prices are NOT mean-reverting in this dataset. GBM may be more appropriate.</div>',
-                unsafe_allow_html=True
-            )
-
-        if not ou.get("_constant_series"):
-            o1, o2, o3, o4 = st.columns(4)
-            o1.metric("Mean Reversion Speed κ", f"{ou['k']:.4f}")
-            o2.metric("Long-Run Mean θ",        f"{ou['theta']:,.2f}")
-            o3.metric("OU Volatility σ",        f"{ou['sigma_ou']*100:.2f}%")
-            hl_label = f"{ou['half_life_years']:.2f} yrs" if not np.isnan(ou['half_life_years']) else "N/A"
-            hl_delta = f"≈ {ou['half_life_periods']:.1f} {est_freq.lower()} periods" if not np.isnan(ou.get('half_life_periods', np.nan)) else None
-            o4.metric("Half-Life", hl_label, delta=hl_delta, delta_color="off")
-
-            with st.expander("Show OU calculation detail"):
+            with st.expander("Show GBM calculation detail"):
                 st.markdown(f"""
-**Method:** OLS regression on Δln(P) = α + β·ln(P_{{t-1}}) + ε
+    | Step | Value |
+    |---|---|
+    | Observations (n) | {gbm['n_obs']} log returns |
+    | Mean log return per {est_freq.lower()} | `{gbm['mu_period']:.6f}` |
+    | Std dev log return per {est_freq.lower()} | `{gbm['sigma_period']:.6f}` |
+    | Annualization factor (N) | `{N_ann}` |
+    | **Annual Drift** = mean × N | `{gbm['mu_annual']:.6f}` → **{gbm['mu_annual']*100:.2f}%** |
+    | **Annual Volatility** = std × √N | `{gbm['sigma_annual']:.6f}` → **{gbm['sigma_annual']*100:.2f}%** |
+    | **Itô-Corrected Drift** = μ − σ²/2 | `{gbm['mu_ito']:.6f}` → **{gbm['mu_ito']*100:.2f}%** |
+    """)
 
-| Parameter | Raw | Annualised |
-|---|---|---|
-| OLS slope β | `{ou['beta']:.6f}` | — |
-| OLS intercept α | `{ou['alpha']:.6f}` | — |
-| **Reversion Speed κ** = −β / dt | — | **{ou['k']:.4f}** |
-| **Long-run Mean θ** = exp(−α / β) | **{ou['theta']:,.2f}** | — |
-| **OU Volatility σ** = std(residuals) / √dt | — | **{ou['sigma_ou']*100:.2f}%** |
-| **Half-life** = ln(2) / κ | — | **{ou['half_life_years']:.4f} years** |
-| R² of regression | `{ou['r_squared']:.4f}` | — |
-| p-value of slope | `{ou['p_value']:.4f}` | — |
-| dt per {est_freq.lower()} period | `{dt:.6f}` | — |
-""")
-                if ou['p_value'] > 0.05:
-                    st.markdown('<div class="warn-box">⚠️ p-value > 0.05 — mean reversion is not statistically significant.</div>', unsafe_allow_html=True)
-                else:
-                    st.markdown('<div class="info-box">✅ p-value < 0.05 — mean reversion is statistically significant.</div>', unsafe_allow_html=True)
-
-            fig_reg, ax_reg = plt.subplots(figsize=(8, 2.8))
-            fig_reg.patch.set_facecolor(DARK_BG)
-            ax_reg.set_facecolor(DARK_BG)
-            ax_reg.scatter(ou["P_lag"], ou["dP"], color=TEAL, alpha=0.4, s=12, label="Δln(P) observations")
-            x_line = np.linspace(ou["P_lag"].min(), ou["P_lag"].max(), 100)
-            ax_reg.plot(x_line, ou["alpha"] + ou["beta"] * x_line, color=RED_CLR, linewidth=1.5, label="OLS fit")
-            ax_reg.axhline(0, color="#4b5563", linewidth=0.8)
-            ax_reg.set_xlabel("ln(P(t-1))", color="#9ca3af", fontsize=9)
-            ax_reg.set_ylabel("Δln(P)", color="#9ca3af", fontsize=9)
-            ax_reg.set_title("OLS Regression: Δln(P) vs ln(P(t-1))", color="#9ca3af", fontsize=10)
-            ax_reg.tick_params(colors="#6b7280", labelsize=8)
-            for sp in ax_reg.spines.values(): sp.set_edgecolor(GRID_CLR)
-            ax_reg.legend(fontsize=8, facecolor="#1a1d27", labelcolor="#9ca3af", edgecolor=GRID_CLR)
+            fig_lr, ax_lr = plt.subplots(figsize=(8, 2.8))
+            fig_lr.patch.set_facecolor(DARK_BG)
+            ax_lr.set_facecolor(DARK_BG)
+            ax_lr.hist(gbm['log_returns'], bins=25, color="#3b82f6", alpha=0.7, edgecolor="#1e293b")
+            ax_lr.axvline(gbm['mu_period'], color=GREEN_OK, linewidth=1.5, linestyle="--",
+                          label=f"Mean: {gbm['mu_period']:.4f}")
+            ax_lr.set_title("Distribution of Log Returns", color="#9ca3af", fontsize=10)
+            ax_lr.tick_params(colors="#6b7280", labelsize=8)
+            for sp in ax_lr.spines.values(): sp.set_edgecolor(GRID_CLR)
+            ax_lr.legend(fontsize=8, facecolor="#1a1d27", labelcolor="#9ca3af", edgecolor=GRID_CLR)
             plt.tight_layout()
-            st.pyplot(fig_reg)
+            st.pyplot(fig_lr)
             plt.close()
 
-        st.markdown('<div class="est-section-header">📋 Summary — Values to Use in Your Simulation</div>', unsafe_allow_html=True)
+            st.markdown('<div class="est-section-header">🔄 Ornstein-Uhlenbeck Parameters</div>', unsafe_allow_html=True)
 
-        hl_y_str  = f"{ou['half_life_years']:.4f}" if not np.isnan(ou['half_life_years']) else "N/A"
-        hl_p_str  = f"{ou['half_life_periods']:.2f}" if not np.isnan(ou.get('half_life_periods', np.nan)) else "N/A"
-        summary = pd.DataFrame({
-            "Parameter": [
-                "Annual Drift μ (GBM)", "Itô-Corrected Drift (GBM input)", "Annual Volatility σ (GBM)",
-                f"{est_freq} Volatility σ (GBM)", "Mean Reversion Speed κ (OU)", "Long-Run Mean θ (OU)",
-                "OU Volatility σ (annualised)", "Half-Life (years)", f"Half-Life ({est_freq.lower()} periods)",
-            ],
-            "Value": [
-                f"{gbm['mu_annual']*100:.4f}%", f"{gbm['mu_ito']*100:.4f}%",
-                f"{gbm['sigma_annual']*100:.4f}%", f"{gbm['sigma_period']*100:.4f}%",
-                f"{ou['k']:.4f}" if not np.isnan(ou['k']) else "N/A",
-                f"{ou['theta']:,.4f}",
-                f"{ou['sigma_ou']*100:.4f}%",
-                hl_y_str, hl_p_str,
-            ],
-            "Use In": [
-                "GBM (raw drift)", "GBM (recommended input)", "GBM (annual steps)",
-                f"GBM ({est_freq.lower()} steps)", "OU simulation", "OU simulation",
-                "OU simulation", "Interpretation", "Interpretation",
-            ]
-        })
-        st.dataframe(summary, width='stretch', hide_index=True)
-
-        dl_col, apply_col = st.columns(2)
-        with dl_col:
-            st.download_button(
-                "⬇️ Download Summary CSV",
-                data=summary.to_csv(index=False),
-                file_name="sugar_model_parameters.csv",
-                mime="text/csv",
-                width='stretch'
-            )
-        with apply_col:
-            apply_target = "GBM" if "GBM" in model else "OU"
-            _ou_k_valid_tab = ou.get("k", 0) > 0
-            _constant_tab   = ou.get("_constant_series", False)
-            can_apply_tab = (not _constant_tab) and (_ou_k_valid_tab if "Mean-Reverting" in model else True)
-            if can_apply_tab:
-                if st.button(f"✅ Apply {apply_target} Parameters to Simulation →", width='stretch'):
-                    if "GBM" in model:
-                        st.session_state["param_mu"]    = float(round(gbm["mu_ito"], 4))
-                        st.session_state["param_sigma"] = float(round(gbm["sigma_annual"], 4))
-                        st.session_state["applied_from"] = "GBM"
-                    else:
-                        st.session_state["param_kappa"] = float(round(ou["k"], 4))
-                        st.session_state["param_theta"] = float(round(ou["theta"], 2))
-                        st.session_state["param_sigma"] = float(round(ou["sigma_ou"], 4))
-                        st.session_state["applied_from"] = "OU"
-                    st.session_state["params_applied"] = True
-                    st.session_state["sim_ran"] = False
-                    st.rerun()
-            else:
+            if ou.get("_constant_series"):
                 st.markdown(
-                    f'<div class="warn-box">Apply {apply_target} blocked: '
-                    + ("κ ≤ 0 — no reversion detected." if not _ou_k_valid_tab else "Constant series.")
-                    + '</div>',
+                    '<div class="warn-box">⚠️ Cannot display OU parameters — constant price series.</div>',
                     unsafe_allow_html=True
                 )
+            elif ou["k"] <= 0:
+                st.markdown(
+                    '<div class="warn-box">⚠️ k ≤ 0 — prices are NOT mean-reverting in this dataset. GBM may be more appropriate.</div>',
+                    unsafe_allow_html=True
+                )
+
+            if not ou.get("_constant_series"):
+                o1, o2, o3, o4 = st.columns(4)
+                o1.metric("Mean Reversion Speed κ", f"{ou['k']:.4f}")
+                o2.metric("Long-Run Mean θ",        f"{ou['theta']:,.2f}")
+                o3.metric("OU Volatility σ",        f"{ou['sigma_ou']*100:.2f}%")
+                hl_label = f"{ou['half_life_years']:.2f} yrs" if not np.isnan(ou['half_life_years']) else "N/A"
+                hl_delta = f"≈ {ou['half_life_periods']:.1f} {est_freq.lower()} periods" if not np.isnan(ou.get('half_life_periods', np.nan)) else None
+                o4.metric("Half-Life", hl_label, delta=hl_delta, delta_color="off")
+
+                with st.expander("Show OU calculation detail"):
+                    st.markdown(f"""
+    **Method:** OLS regression on Δln(P) = α + β·ln(P_{{t-1}}) + ε
+
+    | Parameter | Raw | Annualised |
+    |---|---|---|
+    | OLS slope β | `{ou['beta']:.6f}` | — |
+    | OLS intercept α | `{ou['alpha']:.6f}` | — |
+    | **Reversion Speed κ** = −β / dt | — | **{ou['k']:.4f}** |
+    | **Long-run Mean θ** = exp(−α / β) | **{ou['theta']:,.2f}** | — |
+    | **OU Volatility σ** = std(residuals) / √dt | — | **{ou['sigma_ou']*100:.2f}%** |
+    | **Half-life** = ln(2) / κ | — | **{ou['half_life_years']:.4f} years** |
+    | R² of regression | `{ou['r_squared']:.4f}` | — |
+    | p-value of slope | `{ou['p_value']:.4f}` | — |
+    | dt per {est_freq.lower()} period | `{dt:.6f}` | — |
+    """)
+                    if ou['p_value'] > 0.05:
+                        st.markdown('<div class="warn-box">⚠️ p-value > 0.05 — mean reversion is not statistically significant.</div>', unsafe_allow_html=True)
+                    else:
+                        st.markdown('<div class="info-box">✅ p-value < 0.05 — mean reversion is statistically significant.</div>', unsafe_allow_html=True)
+
+                fig_reg, ax_reg = plt.subplots(figsize=(8, 2.8))
+                fig_reg.patch.set_facecolor(DARK_BG)
+                ax_reg.set_facecolor(DARK_BG)
+                ax_reg.scatter(ou["P_lag"], ou["dP"], color=TEAL, alpha=0.4, s=12, label="Δln(P) observations")
+                x_line = np.linspace(ou["P_lag"].min(), ou["P_lag"].max(), 100)
+                ax_reg.plot(x_line, ou["alpha"] + ou["beta"] * x_line, color=RED_CLR, linewidth=1.5, label="OLS fit")
+                ax_reg.axhline(0, color="#4b5563", linewidth=0.8)
+                ax_reg.set_xlabel("ln(P(t-1))", color="#9ca3af", fontsize=9)
+                ax_reg.set_ylabel("Δln(P)", color="#9ca3af", fontsize=9)
+                ax_reg.set_title("OLS Regression: Δln(P) vs ln(P(t-1))", color="#9ca3af", fontsize=10)
+                ax_reg.tick_params(colors="#6b7280", labelsize=8)
+                for sp in ax_reg.spines.values(): sp.set_edgecolor(GRID_CLR)
+                ax_reg.legend(fontsize=8, facecolor="#1a1d27", labelcolor="#9ca3af", edgecolor=GRID_CLR)
+                plt.tight_layout()
+                st.pyplot(fig_reg)
+                plt.close()
+
+            st.markdown('<div class="est-section-header">📋 Summary — Values to Use in Your Simulation</div>', unsafe_allow_html=True)
+
+            hl_y_str  = f"{ou['half_life_years']:.4f}" if not np.isnan(ou['half_life_years']) else "N/A"
+            hl_p_str  = f"{ou['half_life_periods']:.2f}" if not np.isnan(ou.get('half_life_periods', np.nan)) else "N/A"
+            summary = pd.DataFrame({
+                "Parameter": [
+                    "Annual Drift μ (GBM)", "Itô-Corrected Drift (GBM input)", "Annual Volatility σ (GBM)",
+                    f"{est_freq} Volatility σ (GBM)", "Mean Reversion Speed κ (OU)", "Long-Run Mean θ (OU)",
+                    "OU Volatility σ (annualised)", "Half-Life (years)", f"Half-Life ({est_freq.lower()} periods)",
+                ],
+                "Value": [
+                    f"{gbm['mu_annual']*100:.4f}%", f"{gbm['mu_ito']*100:.4f}%",
+                    f"{gbm['sigma_annual']*100:.4f}%", f"{gbm['sigma_period']*100:.4f}%",
+                    f"{ou['k']:.4f}" if not np.isnan(ou['k']) else "N/A",
+                    f"{ou['theta']:,.4f}",
+                    f"{ou['sigma_ou']*100:.4f}%",
+                    hl_y_str, hl_p_str,
+                ],
+                "Use In": [
+                    "GBM (raw drift)", "GBM (recommended input)", "GBM (annual steps)",
+                    f"GBM ({est_freq.lower()} steps)", "OU simulation", "OU simulation",
+                    "OU simulation", "Interpretation", "Interpretation",
+                ]
+            })
+            st.dataframe(summary, width='stretch', hide_index=True)
+
+            dl_col, apply_col = st.columns(2)
+            with dl_col:
+                st.download_button(
+                    "⬇️ Download Summary CSV",
+                    data=summary.to_csv(index=False),
+                    file_name="sugar_model_parameters.csv",
+                    mime="text/csv",
+                    width='stretch'
+                )
+            with apply_col:
+                apply_target = "GBM" if "GBM" in model else "OU"
+                _ou_k_valid_tab = ou.get("k", 0) > 0
+                _constant_tab   = ou.get("_constant_series", False)
+                can_apply_tab = (not _constant_tab) and (_ou_k_valid_tab if "Mean-Reverting" in model else True)
+                if can_apply_tab:
+                    if st.button(f"✅ Apply {apply_target} Parameters to Simulation →", width='stretch'):
+                        if "GBM" in model:
+                            st.session_state["param_mu"]    = float(round(gbm["mu_ito"], 4))
+                            st.session_state["param_sigma"] = float(round(gbm["sigma_annual"], 4))
+                            st.session_state["applied_from"] = "GBM"
+                        else:
+                            st.session_state["param_kappa"] = float(round(ou["k"], 4))
+                            st.session_state["param_theta"] = float(round(ou["theta"], 2))
+                            st.session_state["param_sigma"] = float(round(ou["sigma_ou"], 4))
+                            st.session_state["applied_from"] = "OU"
+                        st.session_state["params_applied"] = True
+                        st.session_state["sim_ran"] = False
+                        st.rerun()
+                else:
+                    st.markdown(
+                        f'<div class="warn-box">Apply {apply_target} blocked: '
+                        + ("κ ≤ 0 — no reversion detected." if not _ou_k_valid_tab else "Constant series.")
+                        + '</div>',
+                        unsafe_allow_html=True
+                    )
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -1314,6 +1361,18 @@ with tab_sim:
                 terminal        = run_mean_revert_terminal(S0, kappa, theta, sigma, T, N_sim, steps_per_year, seed)
                 times, paths    = run_mean_revert_paths(S0, kappa, theta, sigma, T, steps_per_year, K, seed + 1)
 
+        # BUG 7 — Guard against inf/NaN caused by extreme σ or long horizons
+        _n_bad = int(np.sum(~np.isfinite(terminal)))
+        if _n_bad > 0:
+            pct_bad = _n_bad / len(terminal) * 100
+            st.error(
+                f"⚠️ Simulation produced {_n_bad:,} infinite or invalid values ({pct_bad:.1f}% of paths). "
+                f"This is caused by extremely high volatility (σ={sigma:.2f}) over a long horizon ({horizon_label}). "
+                f"Try reducing σ below 1.0, shortening the horizon, or switching to the Mean-Reverting model."
+            )
+            st.session_state["sim_ran"] = False
+            st.stop()
+
         mean_p   = float(np.mean(terminal))
         median_p = float(np.median(terminal))
         std_p    = float(np.std(terminal))
@@ -1321,7 +1380,7 @@ with tab_sim:
         p25_v    = float(np.percentile(terminal, 25))
         p75_v    = float(np.percentile(terminal, 75))
         p95_v    = float(np.percentile(terminal, 95))
-        var95_v  = S0 - p05_v
+        var95_v  = max(0.0, S0 - p05_v)   # clamp: VaR can't be negative (rising market)
         es_vals  = terminal[terminal <= p05_v]
         es95_v   = float(np.mean(es_vals)) if len(es_vals) > 0 else p05_v
         prob_be_v = float(np.mean(terminal <= breakeven))
@@ -1540,6 +1599,12 @@ with tab_weekly:
             wdf = st.session_state["wdf"]
             n_weeks_int = int(weekly_n_weeks)
             N_sim_int   = int(N_sim)
+            # Inform user the chart reflects the last Run, not current sidebar values
+            st.info(
+                "📌 Showing results from the last **Run Simulation**. "
+                "Sidebar parameters have changed — click **▶ Run Simulation** to update.",
+                icon="🔄"
+            )
 
         bar_col   = "median" if weekly_display == "Median (P50)" else "mean"
         bar_label = "Median" if weekly_display == "Median (P50)" else "Mean"
