@@ -1098,7 +1098,6 @@ tab_est, tab_sim, tab_weekly, tab_saved = st.tabs([
 # `est_data_ok` boolean gate: content only renders inside `if est_data_ok:`
 # blocks, so control always falls through to Tab 2, 3, and 4.
 # ════════════════════════════════════════════════════════════════════════════════
-st.markdown("---")
 with tab_est:
     if df_raw is None or price_col is None:
 st.markdown(
