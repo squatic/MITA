@@ -136,8 +136,8 @@ def render_auth_page():
     st.markdown("""
     <div style="
       min-height: 30vh;
-      background: radial-gradient(ellipse 80% 60% at 20% 80%, rgba(34,85,47,0.4) 0%, transparent 60%),
-                  radial-gradient(ellipse 60% 80% at 80% 20%, rgba(212,168,67,0.15) 0%, transparent 55%),
+      background: radial-gradient(ellipse 80%% 60%% at 20%% 80%%, rgba(34,85,47,0.4) 0%%, transparent 60%%),
+                  radial-gradient(ellipse 60%% 80%% at 80%% 20%%, rgba(212,168,67,0.15) 0%%, transparent 55%%),
                   #0a0f0d;
       display: flex; flex-direction: column; align-items: center; justify-content: center;
       padding: 3rem 1rem 2rem; text-align: center;
