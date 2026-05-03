@@ -783,7 +783,11 @@ with st.sidebar:
         st.rerun()
     st.markdown("---")
 
-    st.markdown("### Model Setup")
+    st.markdown("
+    '<p style="color:#cafc03;">'
+    ### Model Setup"
+    "</p>",
+    unsafe_allow_html=True,)
     model = st.selectbox(
         "Price model",
         ["GBM (Lognormal)", "Mean-Reverting"],
@@ -1861,7 +1865,7 @@ with tab_saved:
 # ── Footer ─────────────────────────────────────────────────────────────────────
 st.markdown("---")
 st.markdown(
-    '<p style="color:#d4a843; font-size:0.8rem;">'
+    '<p style="color:#cafc03; font-size:0.8rem;">'
     "Mill-gate raw sugar price model. "
     "GBM assumes lognormally distributed returns. "
     "Mean-Reverting uses an Ornstein–Uhlenbeck process on log-prices. "
