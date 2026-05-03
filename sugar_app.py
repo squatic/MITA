@@ -1,7 +1,7 @@
 """
 Sugar Price Monte Carlo Risk Model — with integrated Parameter Estimator
 Run with: streamlit run sugar_app.py
-Requires: pip install streamlit plotly numpy scipy matplotlib pandas supabase cryptography
+Requires: conda install streamlit plotly numpy scipy matplotlib pandas supabase json os
 """
 import streamlit as st
 import numpy as np
@@ -13,17 +13,6 @@ from scipy import stats
 import json
 import os
 from datetime import datetime
-import base64 as _b64
-import json as _json
-import hashlib as _hashlib
-
-# ── FIX #2: st.set_page_config() must be the FIRST Streamlit call ──────────────
-st.set_page_config(
-    page_title="Sugar Pricing Forecasting",
-    page_icon="🍬",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
 
 # ── Supabase Client ────────────────────────────────────────────────────────────
 try:
@@ -35,39 +24,6 @@ try:
 except Exception:
     SUPABASE_OK = False
     supabase = None
-    # FIX #1: Define fallbacks so _fernet_key() never raises NameError
-    _SUPABASE_URL = ""
-    _SUPABASE_KEY = ""
-
-
-# ── Encrypted token helpers ────────────────────────────────────────────────────
-def _fernet_key() -> bytes:
-    raw = (_SUPABASE_URL + _SUPABASE_KEY).encode() if SUPABASE_OK else b"dev-fallback"
-    return _b64.urlsafe_b64encode(_hashlib.sha256(raw).digest())
-
-def _encrypt_tokens(access: str, refresh: str) -> str:
-    try:
-        from cryptography.fernet import Fernet
-        return Fernet(_fernet_key()).encrypt(
-            _json.dumps({"a": access, "r": refresh}).encode()
-        ).decode()
-    except Exception:
-        return _b64.urlsafe_b64encode(
-            _json.dumps({"a": access, "r": refresh}).encode()
-        ).decode()
-
-def _decrypt_tokens(enc: str) -> tuple:
-    try:
-        from cryptography.fernet import Fernet
-        d = _json.loads(Fernet(_fernet_key()).decrypt(enc.encode()))
-        return d["a"], d["r"]
-    except Exception:
-        pass
-    try:
-        d = _json.loads(_b64.urlsafe_b64decode(enc.encode()))
-        return d["a"], d["r"]
-    except Exception:
-        return None, None
 
 
 # ── Auth Helpers ───────────────────────────────────────────────────────────────
@@ -88,7 +44,7 @@ def auth_logout():
     st.session_state["user"]          = None
     st.session_state["access_token"]  = None
     st.session_state["refresh_token"] = None
-    st.query_params.clear()
+    st.query_params.clear()   # removes ?tok= so refresh shows login
 
 def get_current_user():
     return st.session_state.get("user", None)
@@ -97,8 +53,8 @@ def get_current_user():
 # ── DB Helpers ─────────────────────────────────────────────────────────────────
 
 def _try_set_session(client, token, refresh):
-    # FIX #11: Guard against None client before calling any method
-    if client is None or not (token and refresh):
+    """Warn instead of silently swallowing stale session errors."""
+    if not (token and refresh):
         return
     try:
         client.auth.set_session(token, refresh)
@@ -195,6 +151,7 @@ def render_auth_page():
            color:#e8dcc8; letter-spacing:-0.02em; margin-bottom:0.4rem;">
         Montecarlo Risk Model | Price Prediction
       </div>
+      <!-- FIX ACCESSIBILITY: restored #3a6b45 (theme-safe green) instead of #ccfa34 (fails light mode) -->
       <div style="font-family:'Space Mono',monospace; font-size:0.72rem; color:#3a6b45;
            letter-spacing:0.2em; text-transform:uppercase; margin-bottom:0.5rem;">
         Monte Carlo Risk Model | Sugar Price Prediction
@@ -217,7 +174,7 @@ def render_auth_page():
         with tab_login:
             email    = st.text_input("Email address", key="login_email", placeholder="you@example.com")
             password = st.text_input("Password", type="password", key="login_pw", placeholder="••••••••")
-            if st.button("Sign In →", key="btn_login"):
+            if st.button("Sign In →", key="btn_login", width='stretch'):
                 if not SUPABASE_OK:
                     st.error("Supabase is not configured. Add credentials to `.streamlit/secrets.toml`.")
                 elif not email or not password:
@@ -229,6 +186,7 @@ def render_auth_page():
                         st.session_state["access_token"]  = res.session.access_token
                         st.session_state["refresh_token"] = res.session.refresh_token
                         supabase.auth.set_session(res.session.access_token, res.session.refresh_token)
+                        # Store encrypted tokens in URL so refresh doesn't log out
                         st.query_params["tok"] = _encrypt_tokens(
                             res.session.access_token, res.session.refresh_token
                         )
@@ -240,7 +198,7 @@ def render_auth_page():
             email2 = st.text_input("Email address", key="signup_email", placeholder="you@example.com")
             pw2    = st.text_input("Password", type="password", key="signup_pw", placeholder="Min. 6 characters")
             pw3    = st.text_input("Confirm password", type="password", key="signup_pw2", placeholder="••••••••")
-            if st.button("Create Account →", key="btn_signup"):
+            if st.button("Create Account →", key="btn_signup", width='stretch'):
                 if not SUPABASE_OK:
                     st.error("Supabase is not configured. Add credentials to `.streamlit/secrets.toml`.")
                 elif not email2 or not pw2:
@@ -262,12 +220,56 @@ def render_auth_page():
 
         st.markdown("</div>", unsafe_allow_html=True)
         st.markdown("""
+        <!-- FIX ACCESSIBILITY: footer disclaimer uses theme-safe #3a6b45 instead of #ccfa34 -->
         <div style="text-align:center; margin-top:1.2rem; font-size:0.7rem;
              color:#3a6b45; font-family:'Space Mono',monospace; letter-spacing:0.06em;">
           Mill-gate Sugar · Philippines · Probabilistic estimates only
         </div>
         """, unsafe_allow_html=True)
 
+
+# ── Page config ────────────────────────────────────────────────────────────────
+st.set_page_config(
+    page_title="Sugar Pricing Forecasting",
+    page_icon="🍬",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+# ── Encrypted token helpers ────────────────────────────────────────────────────
+# Tokens are AES-encrypted before going into the URL so they are unreadable in
+# browser history and server logs. The key is derived from your Supabase secrets
+# so it stays consistent across server restarts (unlike a random key in memory).
+import base64 as _b64, json as _json, hashlib as _hashlib
+
+def _fernet_key() -> bytes:
+    raw = (_SUPABASE_URL + _SUPABASE_KEY).encode() if SUPABASE_OK else b"dev-fallback"
+    return _b64.urlsafe_b64encode(_hashlib.sha256(raw).digest())
+
+def _encrypt_tokens(access: str, refresh: str) -> str:
+    try:
+        from cryptography.fernet import Fernet
+        return Fernet(_fernet_key()).encrypt(
+            _json.dumps({"a": access, "r": refresh}).encode()
+        ).decode()
+    except Exception:
+        # cryptography not installed: fall back to plain base64 (weaker, still functional)
+        return _b64.urlsafe_b64encode(
+            _json.dumps({"a": access, "r": refresh}).encode()
+        ).decode()
+
+def _decrypt_tokens(enc: str) -> tuple:
+    try:
+        from cryptography.fernet import Fernet
+        d = _json.loads(Fernet(_fernet_key()).decrypt(enc.encode()))
+        return d["a"], d["r"]
+    except Exception:
+        pass
+    try:
+        d = _json.loads(_b64.urlsafe_b64decode(enc.encode()))
+        return d["a"], d["r"]
+    except Exception:
+        return None, None
 
 # ── Session state initialisation ───────────────────────────────────────────────
 if "user" not in st.session_state:
@@ -278,6 +280,8 @@ if "refresh_token" not in st.session_state:
     st.session_state["refresh_token"] = None
 
 # ── Restore session from encrypted URL token after browser refresh ─────────────
+# The encrypted blob lives in ?tok= in the URL. Unlike session_state, the URL
+# survives a browser refresh, so the user stays logged in automatically.
 if st.session_state["user"] is None and SUPABASE_OK:
     _tok = st.query_params.get("tok")
     if _tok:
@@ -289,20 +293,21 @@ if st.session_state["user"] is None and SUPABASE_OK:
                     st.session_state["user"]          = _res.user
                     st.session_state["access_token"]  = _res.session.access_token
                     st.session_state["refresh_token"] = _res.session.refresh_token
+                    # Re-encrypt in case Supabase rotated the tokens
                     st.query_params["tok"] = _encrypt_tokens(
                         _res.session.access_token, _res.session.refresh_token
                     )
                 else:
                     st.query_params.clear()
             except Exception:
-                st.query_params.clear()
+                st.query_params.clear()   # expired — show login cleanly
         else:
-            st.query_params.clear()
+            st.query_params.clear()       # corrupt blob — show login cleanly
 
 _user = get_current_user()
 if _user is None:
     render_auth_page()
-   st.stop()
+    st.stop()
 
 _access_token  = st.session_state.get("access_token")
 _refresh_token = st.session_state.get("refresh_token")
@@ -627,10 +632,7 @@ def compute_ou_params(prices: np.ndarray, freq: str) -> dict:
         theta = float(np.exp(-alpha / beta))
 
     residuals = d_logP - (alpha + beta * logP_lag)
-
-    # FIX #9: Guard ddof against small datasets to avoid NaN from np.std
-    ddof = min(2, max(0, len(residuals) - 1))
-    sigma_ou  = np.std(residuals, ddof=ddof) / np.sqrt(dt)
+    sigma_ou  = np.std(residuals, ddof=2) / np.sqrt(dt)
 
     half_life_years   = np.log(2) / k if k > 0 else np.nan
     half_life_periods = half_life_years * N if k > 0 else np.nan
@@ -753,6 +755,7 @@ _defaults = {
     "params_applied": False,
     "applied_from":   None,
     "wdf":            None,
+    # FIX PERFORMANCE: track the param signature that produced the cached wdf
     "wdf_cache_key":  None,
 }
 for _k, _v in _defaults.items():
@@ -775,8 +778,7 @@ with st.sidebar:
         f'<span style="color:#d4a843">{_user.email}</span></div>',
         unsafe_allow_html=True
     )
-    # FIX #3: Removed invalid width='stretch' argument from all st.button() calls
-    if st.button("🚪 Sign Out"):
+    if st.button("🚪 Sign Out", width='stretch'):
         auth_logout()
         st.rerun()
     st.markdown("---")
@@ -823,6 +825,7 @@ with st.sidebar:
     st.markdown("---")
 
     st.markdown("### 📁 Historical Data (optional)")
+    # FIX ACCESSIBILITY: sidebar helper text restored to neutral #6b7280 (passes contrast in both themes)
     st.markdown(
         '<div style="font-size:11px;color:#6b7280;font-family:\'IBM Plex Mono\',monospace;margin-bottom:8px">'
         'Upload a price CSV to auto-estimate model parameters.</div>',
@@ -938,7 +941,7 @@ with st.sidebar:
                 can_apply = _can_apply_gbm if "GBM" in model else _can_apply_ou
 
                 if can_apply:
-                    if st.button(apply_label):
+                    if st.button(apply_label, width='stretch'):
                         if "GBM" in model:
                             st.session_state["param_mu"]    = float(round(gbm_est["mu_ito"], 4))
                             st.session_state["param_sigma"] = float(round(gbm_est["sigma_annual"], 4))
@@ -969,7 +972,7 @@ with st.sidebar:
             f'<span class="applied-pill">✔ Parameters loaded from {st.session_state["applied_from"]} estimation</span>',
             unsafe_allow_html=True
         )
-        if st.button("↩ Reset to defaults"):
+        if st.button("↩ Reset to defaults", width='content'):
             for _k, _v in _defaults.items():
                 st.session_state[_k] = _v
             st.session_state["sim_ran"] = False
@@ -1047,12 +1050,12 @@ with st.sidebar:
     weekly_display  = st.selectbox("Bar shows", ["Median (P50)", "Mean"])
     weekly_interval = st.selectbox("Confidence interval", ["P05–P95 (90%)", "P25–P75 (50%)"])
 
-    run = st.button("▶  Run Simulation")
+    run = st.button("▶  Run Simulation", width='stretch')
 
 
 # ── Title ──────────────────────────────────────────────────────────────────────
 st.markdown('''
-<div class="page-title">🍬 Sugar Pricing Forecasting </div>
+<div class="page-title">🍬 Sugar Priing Forecasting </div>
 <div class="page-subtitle">Montecarlo Risk Model | Price Prediction</div>
 ''', unsafe_allow_html=True)
 col_model, col_spot, col_horizon = st.columns(3)
@@ -1097,8 +1100,7 @@ with tab_est:
                     '<b>OU mean reversion parameters (κ, θ)</b> — then apply them directly to the simulation.</div>',
                     unsafe_allow_html=True)
         st.markdown("#### Expected CSV format")
-        # FIX #3: Replaced invalid width='stretch' with use_container_width=True
-        st.dataframe(sample, use_container_width=True)
+        st.dataframe(sample, width='stretch')
     else:
         _raw_prices_est = df_raw[price_col].values
         _raw_dates_est  = None
@@ -1163,7 +1165,7 @@ with tab_est:
 
         with col_prev:
             st.markdown(f"**{len(prices_est)} observations** · {est_freq} · `{price_col}`")
-            st.dataframe(df_raw[[price_col]].head(10), use_container_width=True)
+            st.dataframe(df_raw[[price_col]].head(10), width='stretch')
 
         with col_chart:
             fig_px, ax_px = plt.subplots(figsize=(7, 3))
@@ -1299,7 +1301,7 @@ with tab_est:
                 "OU simulation", "Interpretation", "Interpretation",
             ]
         })
-        st.dataframe(summary, use_container_width=True, hide_index=True)
+        st.dataframe(summary, width='stretch', hide_index=True)
 
         dl_col, apply_col = st.columns(2)
         with dl_col:
@@ -1308,7 +1310,7 @@ with tab_est:
                 data=summary.to_csv(index=False),
                 file_name="sugar_model_parameters.csv",
                 mime="text/csv",
-                use_container_width=True,
+                width='stretch'
             )
         with apply_col:
             apply_target = "GBM" if "GBM" in model else "OU"
@@ -1316,7 +1318,7 @@ with tab_est:
             _constant_tab   = ou.get("_constant_series", False)
             can_apply_tab = (not _constant_tab) and (_ou_k_valid_tab if "Mean-Reverting" in model else True)
             if can_apply_tab:
-                if st.button(f"✅ Apply {apply_target} Parameters to Simulation →", use_container_width=True):
+                if st.button(f"✅ Apply {apply_target} Parameters to Simulation →", width='stretch'):
                     if "GBM" in model:
                         st.session_state["param_mu"]    = float(round(gbm["mu_ito"], 4))
                         st.session_state["param_sigma"] = float(round(gbm["sigma_annual"], 4))
@@ -1346,18 +1348,13 @@ with tab_sim:
         st.info("👈  Configure the sidebar and click **Run Simulation** to generate results.", icon="💡")
     else:
         with st.spinner("Running Monte Carlo simulation…"):
-            N_sim_int = int(N_sim)
-            # FIX #6: Bound K so it never exceeds N_sim
-            K_int = min(int(K), N_sim_int)
-
+            N_sim, K = int(N_sim), int(K)
             if "GBM" in model:
-                terminal     = run_gbm_terminal(S0, mu, sigma, T, N_sim_int, seed)
-                # FIX #7: Always use weekly resolution (52 steps/yr) for smooth paths
-                #         regardless of the horizon_unit the user picked
-                times, paths = run_gbm_paths(S0, mu, sigma, T, 52, K_int, seed + 1)
+                terminal        = run_gbm_terminal(S0, mu, sigma, T, N_sim, seed)
+                times, paths    = run_gbm_paths(S0, mu, sigma, T, steps_per_year, K, seed + 1)
             else:
-                terminal     = run_mean_revert_terminal(S0, kappa, theta, sigma, T, N_sim_int, steps_per_year, seed)
-                times, paths = run_mean_revert_paths(S0, kappa, theta, sigma, T, 52, K_int, seed + 1)
+                terminal        = run_mean_revert_terminal(S0, kappa, theta, sigma, T, N_sim, steps_per_year, seed)
+                times, paths    = run_mean_revert_paths(S0, kappa, theta, sigma, T, steps_per_year, K, seed + 1)
 
         mean_p   = float(np.mean(terminal))
         median_p = float(np.median(terminal))
@@ -1367,15 +1364,8 @@ with tab_sim:
         p75_v    = float(np.percentile(terminal, 75))
         p95_v    = float(np.percentile(terminal, 95))
         var95_v  = S0 - p05_v
-
-        # FIX #8: Warn if ES cannot be computed instead of silently returning wrong value
         es_vals  = terminal[terminal <= p05_v]
-        if len(es_vals) > 0:
-            es95_v = float(np.mean(es_vals))
-        else:
-            es95_v = p05_v
-            st.warning("Expected Shortfall could not be computed (too few simulations below P05). Using P05 as fallback.")
-
+        es95_v   = float(np.mean(es_vals)) if len(es_vals) > 0 else p05_v
         prob_be_v = float(np.mean(terminal <= breakeven))
 
         st.session_state["last_sim_results"] = {
@@ -1385,7 +1375,7 @@ with tab_sim:
         }
         st.session_state["last_sim_params"] = {
             "model": model, "S0": S0, "horizon_label": horizon_label,
-            "T": T, "N_sim": N_sim_int, "seed": int(seed),
+            "T": T, "N_sim": int(N_sim), "seed": int(seed),
             "breakeven": breakeven, "volume": volume,
             **({"mu": mu, "sigma": sigma} if "GBM" in model else
                {"kappa": kappa, "theta": theta, "sigma": sigma}),
@@ -1434,7 +1424,7 @@ with tab_sim:
         st.markdown("")
         save_col, _ = st.columns([1, 3])
         with save_col:
-            if st.button("💾 Save This Run", use_container_width=True):
+            if st.button("💾 Save This Run", width='stretch'):
                 if not SUPABASE_OK:
                     st.warning("Supabase not configured — cannot save.")
                 elif not st.session_state.get("sim_ran"):
@@ -1480,14 +1470,13 @@ with tab_sim:
                 legend=dict(bgcolor=DARK_BG, bordercolor=GRID_CLR, borderwidth=1),
                 margin=dict(t=30, b=50, l=50, r=30), height=420, barmode="overlay",
             )
-            # FIX #4: Replaced invalid width='stretch' with use_container_width=True
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("P05 (worst 5%)",  f"₱{p05:,.0f}",  f"{(p05/S0-1)*100:+.1f}% vs spot")
             c2.metric("P25",             f"₱{p25:,.0f}",  f"{(p25/S0-1)*100:+.1f}% vs spot")
             c3.metric("P75",             f"₱{p75:,.0f}",  f"{(p75/S0-1)*100:+.1f}% vs spot")
             c4.metric("P95 (best 5%)",   f"₱{p95:,.0f}",  f"{(p95/S0-1)*100:+.1f}% vs spot")
-            st.caption(f"Expected Shortfall (avg price when ≤ P05): **₱{es95:,.0f}/Lkg**  —  Based on {int(N_sim):,} simulations.")
+            st.caption(f"Expected Shortfall (avg price when ≤ P05): **₱{es95:,.0f}/Lkg**  —  Based on {N_sim:,} simulations.")
 
         with tab_paths:
             if horizon_unit == "Weeks":
@@ -1509,7 +1498,7 @@ with tab_sim:
                 y=np.concatenate([path_at_t[3], path_at_t[1][::-1]]),
                 fill="toself", fillcolor="rgba(74,159,181,0.2)", line_color="rgba(0,0,0,0)",
                 name="P25–P75 range", hoverinfo="skip"))
-            display_k = min(int(K), 25)
+            display_k = min(K, 25)
             for i in range(display_k):
                 fig2.add_trace(go.Scatter(
                     x=times_display, y=paths[:, i], mode="lines",
@@ -1527,7 +1516,7 @@ with tab_sim:
                 legend=dict(bgcolor=DARK_BG, bordercolor=GRID_CLR, borderwidth=1),
                 margin=dict(t=30, b=50, l=50, r=30), height=430,
             )
-            st.plotly_chart(fig2, use_container_width=True)
+            st.plotly_chart(fig2, width='stretch')
             st.caption(f"Showing {display_k} sample paths with P05–P95 and P25–P75 confidence bands.")
 
         with tab_pct:
@@ -1542,33 +1531,38 @@ with tab_sim:
                     "Change vs Spot": f"{chg:+.1f}%",
                     "Below Break-even?": "❌ Yes" if v <= breakeven else "✅ No",
                 })
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True, height=520)
+            st.dataframe(pd.DataFrame(rows), width='stretch', hide_index=True, height=520)
             st.caption(f"Spot: ₱{S0:,.0f}/Lkg | Break-even: ₱{breakeven:,.0f}/Lkg | Model: {model}")
     else:
+        # sim hasn't run yet — show placeholder inside the tab without st.stop()
         pass
 
 
 # ════════════════════════════════════════════════════════════════════════════════
 # TAB 3 — Weekly Price Prediction
+# FIX CRITICAL: removed st.stop() from inside the tab block — it killed Tab 4.
+# FIX PERFORMANCE: wdf is only recomputed when `run` fired or params changed;
+#   display-only changes (interval/bar dropdowns) reuse the cached wdf.
 # ════════════════════════════════════════════════════════════════════════════════
 with tab_weekly:
     _sim_has_run = st.session_state.get("sim_ran", False)
 
-    # FIX #5: Removed `and not run` — `run` resets to False on every re-render,
-    #         so checking only `_sim_has_run` is the correct gate
     if not _sim_has_run and not run:
+        # FIX: show info message but DO NOT call st.stop() — allows Tab 4 to render
         st.info(
             "👈  Configure the sidebar and click **Run Simulation** to generate the weekly prediction chart.",
             icon="💡"
         )
     else:
+        # FIX PERFORMANCE: build a cache key from the params that affect wdf output.
+        # Only recompute when the key changes or when Run was explicitly clicked.
         if "GBM" in model:
             _wdf_key = ("GBM", S0, mu, sigma, int(weekly_n_weeks), int(N_sim), int(seed))
         else:
             _wdf_key = ("OU", S0, kappa, theta, sigma, int(weekly_n_weeks), int(N_sim), int(seed))
 
         _need_recompute = (
-            run
+            run  # user clicked Run
             or st.session_state.get("wdf") is None
             or st.session_state.get("wdf_cache_key") != _wdf_key
         )
@@ -1584,6 +1578,7 @@ with tab_weekly:
                 st.session_state["wdf"]           = wdf
                 st.session_state["wdf_cache_key"] = _wdf_key
         else:
+            # Reuse cached result — no simulation needed
             wdf = st.session_state["wdf"]
             n_weeks_int = int(weekly_n_weeks)
             N_sim_int   = int(N_sim)
@@ -1739,7 +1734,7 @@ with tab_weekly:
                 xanchor="left",
             ),
         )
-        st.plotly_chart(fig_w, use_container_width=True)
+        st.plotly_chart(fig_w, width='stretch')
 
         trend_pct = (bar_vals[-1] / S0 - 1) * 100
         trend_dir = "📈 upward" if trend_pct > 1 else ("📉 downward" if trend_pct < -1 else "➡️ flat")
@@ -1775,17 +1770,19 @@ with tab_weekly:
                     "Break-even Risk": risk_flag,
                 })
             tbl_df = pd.DataFrame(tbl_rows)
-            st.dataframe(tbl_df, use_container_width=True, hide_index=True, height=400)
+            st.dataframe(tbl_df, width='stretch', hide_index=True, height=400)
             st.download_button(
                 "⬇️ Download Weekly Forecast CSV",
                 data=tbl_df.to_csv(index=False),
                 file_name="sugar_weekly_forecast.csv",
                 mime="text/csv",
+                width='content',
             )
 
 
 # ════════════════════════════════════════════════════════════════════════════════
 # TAB 4 — Saved Runs
+# (always renders — no st.stop() above this point in the tab block)
 # ════════════════════════════════════════════════════════════════════════════════
 with tab_saved:
     st.markdown('<div class="section-header">Your Saved Simulation Runs</div>', unsafe_allow_html=True)
@@ -1858,7 +1855,7 @@ with tab_saved:
                             f"₱{r.get('es95',0):,.0f}",
                         ]
                     })
-                    st.dataframe(pct_tbl, use_container_width=True, hide_index=True)
+                    st.dataframe(pct_tbl, width='stretch', hide_index=True)
 
 
 # ── Footer ─────────────────────────────────────────────────────────────────────
