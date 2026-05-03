@@ -747,7 +747,7 @@ with st.sidebar:
     <div style="font-family:'Playfair Display',serif; font-size:1.3rem; font-weight:700;
          color:#ccfa34; margin-bottom:0.2rem; line-height:1.2;">
       🍬 Sugar Price<br><span style="font-size:0.9rem;color:#ffffff;font-family:'Space Mono',monospace;
-      font-style:normal;font-weight:400;letter-spacing:0.05em;">Montecarlo Risk Model | Price Prediction</span>
+      font-style:normal;color:#ffffff;font-weight:400;letter-spacing:0.05em;">Montecarlo Risk Model | Price Prediction</span>
     </div>
     """, unsafe_allow_html=True)
     st.markdown(
