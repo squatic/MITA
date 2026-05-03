@@ -1055,7 +1055,7 @@ with st.sidebar:
 
 # ── Title ──────────────────────────────────────────────────────────────────────
 st.markdown('''
-<div class="page-title">🍬 Sugar Priing Forecasting </div>
+<div class="page-title">🍬 Sugar Pricing Forecasting </div>
 <div class="page-subtitle">Montecarlo Risk Model | Price Prediction</div>
 ''', unsafe_allow_html=True)
 col_model, col_spot, col_horizon = st.columns(3)
