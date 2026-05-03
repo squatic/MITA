@@ -1,7 +1,7 @@
 """
 Sugar Price Monte Carlo Risk Model — with integrated Parameter Estimator
 Run with: streamlit run sugar_app.py
-Requires: pip install streamlit plotly numpy scipy matplotlib pandas supabase
+Requires: pip install streamlit plotly numpy scipy matplotlib pandas supabase streamlit-cookies-controller
 """
 import streamlit as st
 import numpy as np
@@ -13,6 +13,15 @@ from scipy import stats
 import json
 import os
 from datetime import datetime
+
+# ── Cookie Controller (persists login across browser refreshes) ────────────────
+try:
+    from streamlit_cookies_controller import CookieController
+    _cookie_ctrl = CookieController()
+    COOKIES_OK = True
+except ImportError:
+    _cookie_ctrl = None
+    COOKIES_OK = False
 
 # ── Supabase Client ────────────────────────────────────────────────────────────
 try:
@@ -37,10 +46,20 @@ def auth_signup(email: str, password: str):
     return res
 
 def auth_logout():
-    supabase.auth.sign_out()
+    try:
+        supabase.auth.sign_out()
+    except Exception:
+        pass
     st.session_state["user"]          = None
     st.session_state["access_token"]  = None
     st.session_state["refresh_token"] = None
+    # Clear persisted cookies so refresh does not auto-login
+    if COOKIES_OK and _cookie_ctrl:
+        try:
+            _cookie_ctrl.remove("sugar_access_token")
+            _cookie_ctrl.remove("sugar_refresh_token")
+        except Exception:
+            pass
 
 def get_current_user():
     return st.session_state.get("user", None)
@@ -182,6 +201,13 @@ def render_auth_page():
                         st.session_state["access_token"]  = res.session.access_token
                         st.session_state["refresh_token"] = res.session.refresh_token
                         supabase.auth.set_session(res.session.access_token, res.session.refresh_token)
+                        # Persist tokens in browser cookies so refresh doesn't log out
+                        if COOKIES_OK and _cookie_ctrl:
+                            try:
+                                _cookie_ctrl.set("sugar_access_token",  res.session.access_token,  max_age=60*60*24*7)
+                                _cookie_ctrl.set("sugar_refresh_token", res.session.refresh_token, max_age=60*60*24*7)
+                            except Exception:
+                                pass
                         st.rerun()
                     except Exception as e:
                         st.error(f"Login failed: {e}")
@@ -234,6 +260,25 @@ if "access_token" not in st.session_state:
     st.session_state["access_token"] = None
 if "refresh_token" not in st.session_state:
     st.session_state["refresh_token"] = None
+
+# ── Restore session from cookies after browser refresh ─────────────────────────
+if st.session_state["user"] is None and COOKIES_OK and _cookie_ctrl and SUPABASE_OK:
+    try:
+        _saved_access  = _cookie_ctrl.get("sugar_access_token")
+        _saved_refresh = _cookie_ctrl.get("sugar_refresh_token")
+        if _saved_access and _saved_refresh:
+            _restored = supabase.auth.set_session(_saved_access, _saved_refresh)
+            if _restored and _restored.user:
+                st.session_state["user"]          = _restored.user
+                st.session_state["access_token"]  = _restored.session.access_token
+                st.session_state["refresh_token"] = _restored.session.refresh_token
+    except Exception:
+        # Tokens expired or invalid — clear cookies and show login
+        try:
+            _cookie_ctrl.remove("sugar_access_token")
+            _cookie_ctrl.remove("sugar_refresh_token")
+        except Exception:
+            pass
 
 _user = get_current_user()
 if _user is None:
