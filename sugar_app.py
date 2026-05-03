@@ -1767,7 +1767,9 @@ with tab_saved:
 
                     st.markdown(
                         f"**Model:** {p.get('model','?')}  |  "
-                        f"**Simulations:** {p.get('N_sim', '?'):,}  |  "
+                        n_sim = p.get('N_sim')
+                        sim_str = f"{n_sim:,}" if isinstance(n_sim, int) else "?"
+                        f"**Simulations:** {sim_str}"
                         f"**Break-even:** ₱{p.get('breakeven', 0):,.0f}/Lkg  |  "
                         f"**Seed:** {p.get('seed','?')}"
                     )
