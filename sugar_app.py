@@ -44,8 +44,6 @@ def auth_logout():
     st.session_state["user"]          = None
     st.session_state["access_token"]  = None
     st.session_state["refresh_token"] = None
-    # FIX (Bug 2): Do NOT clear URL params that contain tokens — we no longer
-    # store tokens in the URL at all, so there is nothing to clear here.
 
 def get_current_user():
     return st.session_state.get("user", None)
@@ -174,7 +172,11 @@ def render_auth_page():
         with tab_login:
             email    = st.text_input("Email address", key="login_email", placeholder="you@example.com")
             password = st.text_input("Password", type="password", key="login_pw", placeholder="••••••••")
-            if st.button("Sign In →", key="btn_login", width='stretch'):
+            # BUG FIX 1: Removed invalid `width='stretch'` kwarg from all st.button() calls.
+            # st.button() does not accept a `width` parameter — it raises a TypeError at runtime.
+            # Use CSS (`.stButton > button { width: 100% }`) to control button width instead,
+            # which is already handled by the existing CSS block above.
+            if st.button("Sign In →", key="btn_login"):
                 if not SUPABASE_OK:
                     st.error("Supabase is not configured. Add credentials to `.streamlit/secrets.toml`.")
                 elif not email or not password:
@@ -182,10 +184,6 @@ def render_auth_page():
                 else:
                     try:
                         res = auth_login(email, password)
-                        # FIX (Bug 2): Store tokens ONLY in session_state — never in the URL.
-                        # The URL ?tok= approach exposes long-lived refresh tokens in browser
-                        # history, proxy logs, and referrer headers even when Fernet-encrypted,
-                        # because the decryption key is derivable from semi-public Supabase creds.
                         st.session_state["user"]          = res.user
                         st.session_state["access_token"]  = res.session.access_token
                         st.session_state["refresh_token"] = res.session.refresh_token
@@ -198,7 +196,7 @@ def render_auth_page():
             email2 = st.text_input("Email address", key="signup_email", placeholder="you@example.com")
             pw2    = st.text_input("Password", type="password", key="signup_pw", placeholder="Min. 6 characters")
             pw3    = st.text_input("Confirm password", type="password", key="signup_pw2", placeholder="••••••••")
-            if st.button("Create Account →", key="btn_signup", width='stretch'):
+            if st.button("Create Account →", key="btn_signup"):  # BUG FIX 1: removed width='stretch'
                 if not SUPABASE_OK:
                     st.error("Supabase is not configured. Add credentials to `.streamlit/secrets.toml`.")
                 elif not email2 or not pw2:
@@ -242,12 +240,6 @@ if "access_token" not in st.session_state:
     st.session_state["access_token"] = None
 if "refresh_token" not in st.session_state:
     st.session_state["refresh_token"] = None
-
-# FIX (Bug 2): Removed all URL ?tok= token persistence logic.
-# Tokens now live exclusively in st.session_state. Consequence: a hard browser
-# refresh will require the user to sign in again — this is the correct and safe
-# behaviour. To enable persistent sessions properly, use Supabase's
-# PKCE/cookie flow or a server-side session table, not the URL.
 
 _user = get_current_user()
 if _user is None:
@@ -420,13 +412,16 @@ st.markdown("""
     transform: translateY(-1px);
     color: #d8f8e0 !important;
   }
-  section[data-testid="stSidebar"] .stButton:last-of-type > button {
+  /* BUG FIX 5: Replaced fragile :last-of-type CSS selector for the sign-out button
+     with a dedicated .signout-btn class applied via st.markdown wrapper div.
+     The :last-of-type approach breaks whenever new buttons are added to the sidebar. */
+  .signout-btn > button {
     background: linear-gradient(135deg, #6b4800 0%, #a06c00 100%) !important;
     color: #fff3cc !important;
     border: 1px solid rgba(212,168,67,0.4) !important;
     box-shadow: 0 3px 16px rgba(160,108,0,0.35) !important;
   }
-  section[data-testid="stSidebar"] .stButton:last-of-type > button:hover {
+  .signout-btn > button:hover {
     background: linear-gradient(135deg, #7d5500 0%, #b87c00 100%) !important;
     box-shadow: 0 5px 24px rgba(160,108,0,0.5) !important;
   }
@@ -608,16 +603,7 @@ def run_gbm_terminal(S0, mu, sigma, T, N, seed):
 
 def run_mean_revert_terminal(S0, kappa, theta, sigma, T, N, steps_per_year, seed):
     """
-    FIX (Bug 4): Use the exact OU solution instead of Euler-Maruyama to eliminate
-    numerical instability when κ·dt ≥ 1 (e.g. κ=100 with weekly steps).
-
-    Exact solution for log-OU:
-        ln_S_t = ln_theta_adj + (ln_S_0 - ln_theta_adj)*exp(-κ·dt)
-                 + σ·sqrt((1 - exp(-2κ·dt)) / (2κ)) · Z
-
-    where ln_theta_adj = ln(θ) - σ²/(2κ)  (Itô correction for log-price mean).
-
-    This is unconditionally stable for all κ > 0 and dt > 0.
+    Exact OU solution — unconditionally stable for all κ > 0 and dt > 0.
     """
     rng      = np.random.default_rng(seed)
     steps    = max(1, int(T * steps_per_year))
@@ -631,7 +617,6 @@ def run_mean_revert_terminal(S0, kappa, theta, sigma, T, N, steps_per_year, seed
     for _ in range(steps):
         Z    = rng.standard_normal(N)
         ln_S = ln_theta_adj + (ln_S - ln_theta_adj) * decay + noise_scale * Z
-        # Safety clamp: prevent exp() overflow/underflow (±30 in log-space)
         np.clip(ln_S, -30.0, 30.0, out=ln_S)
 
     return np.exp(ln_S)
@@ -650,10 +635,7 @@ def run_gbm_paths(S0, mu, sigma, T, steps_per_year, K, seed):
 
 
 def run_mean_revert_paths(S0, kappa, theta, sigma, T, steps_per_year, K, seed):
-    """
-    FIX (Bug 4): Use the exact OU solution for path generation as well.
-    Same reasoning as run_mean_revert_terminal above.
-    """
+    """Exact OU solution for path generation."""
     rng          = np.random.default_rng(seed)
     steps        = max(1, int(T * steps_per_year))
     dt           = T / steps
@@ -667,7 +649,6 @@ def run_mean_revert_paths(S0, kappa, theta, sigma, T, steps_per_year, K, seed):
     for t in range(1, steps + 1):
         Z = rng.standard_normal(K)
         ln_paths[t] = ln_theta_adj + (ln_paths[t - 1] - ln_theta_adj) * decay + noise_scale * Z
-        # Safety clamp
         np.clip(ln_paths[t], -30.0, 30.0, out=ln_paths[t])
 
     return np.linspace(0, T, steps + 1), np.exp(ln_paths)
@@ -696,9 +677,7 @@ def run_weekly_gbm(S0, mu, sigma, n_weeks, N_sim, seed):
 
 
 def run_weekly_ou(S0, kappa, theta, sigma, n_weeks, N_sim, seed):
-    """
-    FIX (Bug 4): Exact OU solution applied to weekly simulation as well.
-    """
+    """Exact OU solution applied to weekly simulation."""
     rng          = np.random.default_rng(seed)
     dt           = 1 / 52
     ln_theta_adj = np.log(theta) - sigma**2 / (2 * kappa)
@@ -722,6 +701,14 @@ def run_weekly_ou(S0, kappa, theta, sigma, n_weeks, N_sim, seed):
             "p95":    float(np.percentile(prices, 95)),
         })
     return pd.DataFrame(weekly_stats)
+
+
+# ── ES minimum-samples constant ────────────────────────────────────────────────
+# BUG FIX 2: Moved _ES_MIN_SAMPLES to module scope so it is accessible in both
+# the simulation block (where ES is computed) AND the display block (where session
+# state is restored after a rerun). Previously it was defined inside the `if run:`
+# branch, making it an undefined name when the tab rendered from session state.
+_ES_MIN_SAMPLES = 30
 
 
 # ── Session State Defaults ─────────────────────────────────────────────────────
@@ -756,9 +743,13 @@ with st.sidebar:
         f'<span style="color:#d4a843">{_user.email}</span></div>',
         unsafe_allow_html=True
     )
-    if st.button("🚪 Sign Out", width='stretch'):
+    # BUG FIX 5: Wrap sign-out button in a div with class "signout-btn" so its
+    # distinct CSS targets it reliably instead of the fragile :last-of-type selector.
+    st.markdown('<div class="signout-btn">', unsafe_allow_html=True)
+    if st.button("🚪 Sign Out", key="btn_signout"):  # BUG FIX 1: removed width='stretch'
         auth_logout()
         st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
     st.markdown("---")
 
     st.markdown("### Model Setup")
@@ -895,9 +886,6 @@ with st.sidebar:
                     hl_str = f"{hl_val:.2f} yr" if not np.isnan(hl_val) else "N/A"
                     k_ok   = k_val > 0
 
-                    # FIX (Bug 4): Warn when κ·dt is large enough to cause instability
-                    # in naive Euler (now moot for the exact solution, but still useful
-                    # as a sanity signal for the user's parameter choices).
                     _dt_sidebar = dt_value(est_freq)
                     if k_ok and k_val * _dt_sidebar > 0.5:
                         st.markdown(
@@ -932,7 +920,7 @@ with st.sidebar:
                 can_apply = _can_apply_gbm if "GBM" in model else _can_apply_ou
 
                 if can_apply:
-                    if st.button(apply_label, width='stretch'):
+                    if st.button(apply_label):  # BUG FIX 1: removed width='stretch'
                         if "GBM" in model:
                             st.session_state["param_mu"]    = float(round(gbm_est["mu_ito"], 4))
                             st.session_state["param_sigma"] = float(round(gbm_est["sigma_annual"], 4))
@@ -963,7 +951,7 @@ with st.sidebar:
             f'<span class="applied-pill">✔ Parameters loaded from {st.session_state["applied_from"]} estimation</span>',
             unsafe_allow_html=True
         )
-        if st.button("↩ Reset to defaults", width='content'):
+        if st.button("↩ Reset to defaults"):  # BUG FIX 1: removed width='content'
             for _k, _v in _defaults.items():
                 st.session_state[_k] = _v
             st.session_state["sim_ran"] = False
@@ -1000,8 +988,7 @@ with st.sidebar:
                 unsafe_allow_html=True
             )
 
-        # FIX (Bug 4): Warn user when κ·dt is large (though exact solution handles it)
-        _dt_sim = dt_value("Weekly")   # simulation always runs at weekly granularity internally
+        _dt_sim = dt_value("Weekly")
         if kappa * _dt_sim > 0.5:
             st.markdown(
                 f'<div class="warn-box">ℹ️ High κ·dt = {kappa * _dt_sim:.2f}. '
@@ -1038,24 +1025,26 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### Simulation Settings")
 
-    # FIX (Bug 3): Enforce N_sim ≥ 1000 to ensure ES/CVaR has enough tail samples.
-    N_sim = st.number_input(
+    # BUG FIX 3: Cast N_sim to int immediately after reading from number_input.
+    # st.number_input returns a float by default when step is a float-like value,
+    # which causes downstream TypeError when passed to np.random functions expecting int.
+    N_sim = int(st.number_input(
         "Terminal simulations (N)", min_value=1000, max_value=100_000,
         value=5000, step=1000,
         help="Minimum 1,000 required for reliable Expected Shortfall (ES/CVaR). Capped at 100,000."
-    )
-    K     = st.number_input("Sample paths to display", min_value=1, value=30, step=5)
-    seed  = st.number_input("Random seed", min_value=0, value=42, step=1)
+    ))
+    K     = int(st.number_input("Sample paths to display", min_value=1, value=30, step=5))
+    seed  = int(st.number_input("Random seed", min_value=0, value=42, step=1))
 
     st.markdown("---")
     st.markdown("### 📅 Weekly Prediction Settings")
-    weekly_n_weeks = st.number_input(
+    weekly_n_weeks = int(st.number_input(
         "Weeks to forecast", min_value=4, max_value=104, value=26, step=4,
-    )
+    ))
     weekly_display  = st.selectbox("Bar shows", ["Median (P50)", "Mean"])
     weekly_interval = st.selectbox("Confidence interval", ["P05–P95 (90%)", "P25–P75 (50%)"])
 
-    run = st.button("▶  Run Simulation", width='stretch')
+    run = st.button("▶  Run Simulation")  # BUG FIX 1: removed width='stretch'
 
 
 # ── Title ──────────────────────────────────────────────────────────────────────
@@ -1092,11 +1081,6 @@ tab_est, tab_sim, tab_weekly, tab_saved = st.tabs([
 
 # ════════════════════════════════════════════════════════════════════════════════
 # TAB 1 — Parameter Estimator
-# FIX (Bug 1): Replaced all st.stop() calls inside this tab with a flag-based
-# early-exit pattern. st.stop() halts the entire Streamlit script, which
-# prevents all subsequent tabs from rendering. Instead, we use an
-# `est_data_ok` boolean gate: content only renders inside `if est_data_ok:`
-# blocks, so control always falls through to Tab 2, 3, and 4.
 # ════════════════════════════════════════════════════════════════════════════════
 with tab_est:
     if df_raw is None or price_col is None:
@@ -1110,7 +1094,10 @@ with tab_est:
                     '<b>OU mean reversion parameters (κ, θ)</b> — then apply them directly to the simulation.</div>',
                     unsafe_allow_html=True)
         st.markdown("#### Expected CSV format")
-        st.dataframe(sample, width='stretch')
+        # BUG FIX 4: Replaced invalid width='stretch' with use_container_width=True on all
+        # st.dataframe() calls. width='stretch' is not a valid Streamlit parameter and
+        # raises TypeError. use_container_width=True is the correct API.
+        st.dataframe(sample, use_container_width=True)
     else:
         _raw_prices_est = df_raw[price_col].values
         _raw_dates_est  = None
@@ -1129,9 +1116,6 @@ with tab_est:
                 unsafe_allow_html=True
             )
 
-        # FIX (Bug 1): Guard with a flag instead of st.stop().
-        # All content below is wrapped in `if est_data_ok:` so the tab renders
-        # an informative error but does NOT halt the script for other tabs.
         est_data_ok = len(prices_est) >= 10
 
         if not est_data_ok:
@@ -1140,7 +1124,6 @@ with tab_est:
                 f"to estimate model parameters. Please upload a CSV with more rows, or check that "
                 f"the correct price column is selected and that values are positive numbers."
             )
-            # Tab content stops here; script continues to Tab 2 / 3 / 4.
         else:
             if dates_est_clean is not None:
                 dates_est = dates_est_clean
@@ -1184,7 +1167,7 @@ with tab_est:
 
             with col_prev:
                 st.markdown(f"**{len(prices_est)} observations** · {est_freq} · `{price_col}`")
-                st.dataframe(df_raw[[price_col]].head(10), width='stretch')
+                st.dataframe(df_raw[[price_col]].head(10), use_container_width=True)  # BUG FIX 4
 
             with col_chart:
                 fig_px, ax_px = plt.subplots(figsize=(7, 3))
@@ -1320,7 +1303,7 @@ with tab_est:
                     "OU simulation", "Interpretation", "Interpretation",
                 ]
             })
-            st.dataframe(summary, width='stretch', hide_index=True)
+            st.dataframe(summary, use_container_width=True, hide_index=True)  # BUG FIX 4
 
             dl_col, apply_col = st.columns(2)
             with dl_col:
@@ -1329,15 +1312,14 @@ with tab_est:
                     data=summary.to_csv(index=False),
                     file_name="sugar_model_parameters.csv",
                     mime="text/csv",
-                    width='stretch'
-                )
+                )  # BUG FIX 1: removed width='stretch'
             with apply_col:
                 apply_target = "GBM" if "GBM" in model else "OU"
                 _ou_k_valid_tab = ou.get("k", 0) > 0
                 _constant_tab   = ou.get("_constant_series", False)
                 can_apply_tab = (not _constant_tab) and (_ou_k_valid_tab if "Mean-Reverting" in model else True)
                 if can_apply_tab:
-                    if st.button(f"✅ Apply {apply_target} Parameters to Simulation →", width='stretch'):
+                    if st.button(f"✅ Apply {apply_target} Parameters to Simulation →"):  # BUG FIX 1
                         if "GBM" in model:
                             st.session_state["param_mu"]    = float(round(gbm["mu_ito"], 4))
                             st.session_state["param_sigma"] = float(round(gbm["sigma_annual"], 4))
@@ -1367,7 +1349,6 @@ with tab_sim:
         st.info("👈  Configure the sidebar and click **Run Simulation** to generate results.", icon="💡")
     else:
         with st.spinner("Running Monte Carlo simulation…"):
-            N_sim, K = int(N_sim), int(K)
             if "GBM" in model:
                 terminal        = run_gbm_terminal(S0, mu, sigma, T, N_sim, seed)
                 times, paths    = run_gbm_paths(S0, mu, sigma, T, steps_per_year, K, seed + 1)
@@ -1384,21 +1365,19 @@ with tab_sim:
         p95_v    = float(np.percentile(terminal, 95))
         var95_v  = S0 - p05_v
 
-        # FIX (Bug 3): Distinguish between a well-estimated ES and an unreliable one.
-        # With N_sim ≥ 1000 (enforced in sidebar), the 5% tail has at least ~50 samples.
-        # We still check explicitly and flag any edge case with a clear "unreliable" label.
         es_vals = terminal[terminal <= p05_v]
-        _ES_MIN_SAMPLES = 30   # below this the ES estimate is meaningless
+        # BUG FIX 2: _ES_MIN_SAMPLES is now a module-level constant (defined above),
+        # so this block works correctly whether we arrive here via a fresh run or
+        # a page rerender from session state.
         if len(es_vals) >= _ES_MIN_SAMPLES:
-            es95_v      = float(np.mean(es_vals))
-            es95_label  = f"₱{es95_v:,.0f}"
-            es95_delta  = None
+            es95_v        = float(np.mean(es_vals))
+            es95_label    = f"₱{es95_v:,.0f}"
+            es95_delta    = None
             es95_reliable = True
         else:
-            # Extremely unlikely with N_sim ≥ 1000 but guard it anyway
-            es95_v      = p05_v
-            es95_label  = "N/A"
-            es95_delta  = f"< {_ES_MIN_SAMPLES} tail samples ({len(es_vals)} found)"
+            es95_v        = p05_v
+            es95_label    = "N/A"
+            es95_delta    = f"< {_ES_MIN_SAMPLES} tail samples ({len(es_vals)} found)"
             es95_reliable = False
 
         prob_be_v = float(np.mean(terminal <= breakeven))
@@ -1412,7 +1391,7 @@ with tab_sim:
         }
         st.session_state["last_sim_params"] = {
             "model": model, "S0": S0, "horizon_label": horizon_label,
-            "T": T, "N_sim": int(N_sim), "seed": int(seed),
+            "T": T, "N_sim": N_sim, "seed": seed,
             "breakeven": breakeven, "volume": volume,
             **({"mu": mu, "sigma": sigma} if "GBM" in model else
                {"kappa": kappa, "theta": theta, "sigma": sigma}),
@@ -1438,11 +1417,10 @@ with tab_sim:
         p75      = _r["p75"]
         p95      = _r["p95"]
         var95    = _r["var95"]
-        es95     = _r.get("es95") or p05   # fallback for display only
+        es95     = _r.get("es95") or p05
         prob_be  = _r["prob_be"]
         rev_risk = var95 * volume if volume > 0 else None
 
-        # Restore ES display labels from session state
         es95_reliable = st.session_state.get("last_es_reliable", True)
         es95_label    = st.session_state.get("last_es_label", f"₱{es95:,.0f}")
         es95_delta    = st.session_state.get("last_es_delta", None)
@@ -1469,7 +1447,7 @@ with tab_sim:
         st.markdown("")
         save_col, _ = st.columns([1, 3])
         with save_col:
-            if st.button("💾 Save This Run", width='stretch'):
+            if st.button("💾 Save This Run"):  # BUG FIX 1: removed width='stretch'
                 if not SUPABASE_OK:
                     st.warning("Supabase not configured — cannot save.")
                 elif not st.session_state.get("sim_ran"):
@@ -1515,20 +1493,19 @@ with tab_sim:
                 legend=dict(bgcolor=DARK_BG, bordercolor=GRID_CLR, borderwidth=1),
                 margin=dict(t=30, b=50, l=50, r=30), height=420, barmode="overlay",
             )
-            st.plotly_chart(fig, width='stretch')
+            # BUG FIX 4: Replaced invalid width='stretch' with use_container_width=True
+            # on all st.plotly_chart() calls. width='stretch' is not a valid parameter.
+            st.plotly_chart(fig, use_container_width=True)
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("P05 (worst 5%)",  f"₱{p05:,.0f}",  f"{(p05/S0-1)*100:+.1f}% vs spot")
             c2.metric("P25",             f"₱{p25:,.0f}",  f"{(p25/S0-1)*100:+.1f}% vs spot")
             c3.metric("P75",             f"₱{p75:,.0f}",  f"{(p75/S0-1)*100:+.1f}% vs spot")
             c4.metric("P95 (best 5%)",   f"₱{p95:,.0f}",  f"{(p95/S0-1)*100:+.1f}% vs spot")
 
-            # FIX (Bug 3): Show ES/CVaR with an explicit reliability indicator.
-            # If there are fewer than _ES_MIN_SAMPLES tail observations, the metric
-            # shows "N/A" with the sample count so the user understands why.
             if es95_reliable:
                 st.caption(
                     f"Expected Shortfall / CVaR (avg price when ≤ P05): "
-                    f"**₱{es95:,.0f}/Lkg**  —  Based on {int(N_sim):,} simulations "
+                    f"**₱{es95:,.0f}/Lkg**  —  Based on {N_sim:,} simulations "
                     f"({len(terminal[terminal <= p05])} tail samples)."
                 )
             else:
@@ -1578,7 +1555,7 @@ with tab_sim:
                 legend=dict(bgcolor=DARK_BG, bordercolor=GRID_CLR, borderwidth=1),
                 margin=dict(t=30, b=50, l=50, r=30), height=430,
             )
-            st.plotly_chart(fig2, width='stretch')
+            st.plotly_chart(fig2, use_container_width=True)  # BUG FIX 4
             st.caption(f"Showing {display_k} sample paths with P05–P95 and P25–P75 confidence bands.")
 
         with tab_pct:
@@ -1593,7 +1570,7 @@ with tab_sim:
                     "Change vs Spot": f"{chg:+.1f}%",
                     "Below Break-even?": "❌ Yes" if v <= breakeven else "✅ No",
                 })
-            st.dataframe(pd.DataFrame(rows), width='stretch', hide_index=True, height=520)
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True, height=520)  # BUG FIX 4
             st.caption(f"Spot: ₱{S0:,.0f}/Lkg | Break-even: ₱{breakeven:,.0f}/Lkg | Model: {model}")
     else:
         pass
@@ -1612,9 +1589,9 @@ with tab_weekly:
         )
     else:
         if "GBM" in model:
-            _wdf_key = ("GBM", S0, mu, sigma, int(weekly_n_weeks), int(N_sim), int(seed))
+            _wdf_key = ("GBM", S0, mu, sigma, weekly_n_weeks, N_sim, seed)
         else:
-            _wdf_key = ("OU", S0, kappa, theta, sigma, int(weekly_n_weeks), int(N_sim), int(seed))
+            _wdf_key = ("OU", S0, kappa, theta, sigma, weekly_n_weeks, N_sim, seed)
 
         _need_recompute = (
             run
@@ -1624,18 +1601,14 @@ with tab_weekly:
 
         if _need_recompute:
             with st.spinner("Computing week-by-week predictions…"):
-                n_weeks_int = int(weekly_n_weeks)
-                N_sim_int   = int(N_sim)
                 if "GBM" in model:
-                    wdf = run_weekly_gbm(S0, mu, sigma, n_weeks_int, N_sim_int, seed + 99)
+                    wdf = run_weekly_gbm(S0, mu, sigma, weekly_n_weeks, N_sim, seed + 99)
                 else:
-                    wdf = run_weekly_ou(S0, kappa, theta, sigma, n_weeks_int, N_sim_int, seed + 99)
+                    wdf = run_weekly_ou(S0, kappa, theta, sigma, weekly_n_weeks, N_sim, seed + 99)
                 st.session_state["wdf"]           = wdf
                 st.session_state["wdf_cache_key"] = _wdf_key
         else:
             wdf = st.session_state["wdf"]
-            n_weeks_int = int(weekly_n_weeks)
-            N_sim_int   = int(N_sim)
 
         bar_col   = "median" if weekly_display == "Median (P50)" else "mean"
         bar_label = "Median" if weekly_display == "Median (P50)" else "Mean"
@@ -1668,11 +1641,11 @@ with tab_weekly:
 
         w1, w2, w3, w4, w5 = st.columns(5)
         w1.metric("Week 1 Forecast",      f"₱{bar_vals[0]:,.0f}",  f"{(bar_vals[0]/S0-1)*100:+.1f}% vs spot")
-        mid_idx = min(n_weeks_int // 2, n_weeks_int - 1)
+        mid_idx = min(weekly_n_weeks // 2, weekly_n_weeks - 1)
         w2.metric(f"Week {mid_idx+1} Forecast", f"₱{bar_vals[mid_idx]:,.0f}", f"{(bar_vals[mid_idx]/S0-1)*100:+.1f}% vs spot")
-        w3.metric(f"Week {n_weeks_int} Forecast", f"₱{bar_vals[-1]:,.0f}", f"{(bar_vals[-1]/S0-1)*100:+.1f}% vs spot")
+        w3.metric(f"Week {weekly_n_weeks} Forecast", f"₱{bar_vals[-1]:,.0f}", f"{(bar_vals[-1]/S0-1)*100:+.1f}% vs spot")
         weeks_below = int(np.sum(bar_vals <= breakeven))
-        w4.metric("Weeks Below Break-even", f"{weeks_below} / {n_weeks_int}")
+        w4.metric("Weeks Below Break-even", f"{weeks_below} / {weekly_n_weeks}")
         peak_wk = int(np.argmax(bar_vals)) + 1
         w5.metric("Peak Forecast Week", f"Week {peak_wk}", f"₱{bar_vals[peak_wk-1]:,.0f}")
 
@@ -1758,7 +1731,7 @@ with tab_weekly:
                 zeroline=False,
                 tickmode="linear",
                 tick0=1,
-                dtick=max(1, n_weeks_int // 13),
+                dtick=max(1, weekly_n_weeks // 13),
                 tickfont=dict(size=11),
             ),
             yaxis=dict(
@@ -1782,22 +1755,22 @@ with tab_weekly:
             margin=dict(t=60, b=60, l=70, r=30),
             height=500,
             title=dict(
-                text=f"Week-by-Week {bar_label} Sugar Price Forecast · {n_weeks_int} Weeks · {model}",
+                text=f"Week-by-Week {bar_label} Sugar Price Forecast · {weekly_n_weeks} Weeks · {model}",
                 font=dict(family="DM Serif Display, serif", size=16, color="#8ab4cc"),
                 x=0.0,
                 xanchor="left",
             ),
         )
-        st.plotly_chart(fig_w, width='stretch')
+        st.plotly_chart(fig_w, use_container_width=True)  # BUG FIX 4
 
         trend_pct = (bar_vals[-1] / S0 - 1) * 100
         trend_dir = "📈 upward" if trend_pct > 1 else ("📉 downward" if trend_pct < -1 else "➡️ flat")
         st.caption(
-            f"Overall trend over {n_weeks_int} weeks: **{trend_dir}** · "
-            f"Start ₱{S0:,.0f} → Week {n_weeks_int} {bar_label} ₱{bar_vals[-1]:,.0f} "
+            f"Overall trend over {weekly_n_weeks} weeks: **{trend_dir}** · "
+            f"Start ₱{S0:,.0f} → Week {weekly_n_weeks} {bar_label} ₱{bar_vals[-1]:,.0f} "
             f"({trend_pct:+.1f}%) · "
             f"Error bars show {int_label} confidence interval · "
-            f"Based on {N_sim_int:,} Monte Carlo paths."
+            f"Based on {N_sim:,} Monte Carlo paths."
         )
 
         with st.expander("📋 View detailed weekly forecast table"):
@@ -1824,14 +1797,13 @@ with tab_weekly:
                     "Break-even Risk": risk_flag,
                 })
             tbl_df = pd.DataFrame(tbl_rows)
-            st.dataframe(tbl_df, width='stretch', hide_index=True, height=400)
+            st.dataframe(tbl_df, use_container_width=True, hide_index=True, height=400)  # BUG FIX 4
             st.download_button(
                 "⬇️ Download Weekly Forecast CSV",
                 data=tbl_df.to_csv(index=False),
                 file_name="sugar_weekly_forecast.csv",
                 mime="text/csv",
-                width='content',
-            )
+            )  # BUG FIX 1: removed width='content'
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -1843,7 +1815,7 @@ with tab_saved:
     if not SUPABASE_OK:
         st.warning("Supabase is not configured. Add your credentials to `.streamlit/secrets.toml` to enable saving.")
     else:
-        if st.button("🔄 Refresh", key="refresh_saved"):
+        if st.button("🔄 Refresh", key="refresh_saved"):  # BUG FIX 1: removed width param
             st.rerun()
 
         runs = load_simulations(
@@ -1899,7 +1871,6 @@ with tab_saved:
                     else:
                         st.markdown(f"κ = `{p.get('kappa','?')}` · θ = `₱{p.get('theta',0):,.0f}` · σ = `{p.get('sigma','?')}`")
 
-                    # FIX (Bug 3): Show ES as N/A in saved runs when it wasn't computed reliably.
                     es_saved = r.get("es95")
                     es_display = f"₱{es_saved:,.0f}" if es_saved is not None else "N/A"
 
@@ -1912,7 +1883,7 @@ with tab_saved:
                             es_display,
                         ]
                     })
-                    st.dataframe(pct_tbl, width='stretch', hide_index=True)
+                    st.dataframe(pct_tbl, use_container_width=True, hide_index=True)  # BUG FIX 4
 
 
 # ── Footer ─────────────────────────────────────────────────────────────────────
