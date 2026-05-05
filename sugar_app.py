@@ -145,7 +145,7 @@ def render_auth_page():
       display: flex; flex-direction: column; align-items: center; justify-content: center;
       padding: 3rem 1rem 2rem; text-align: center;
     ">
-      <div style="font-size:4rem; margin-bottom:1rem; filter: drop-shadow(0 0 30px rgba(52,200,80,0.5));">🍬</div>
+      <div style="font-size:4rem; margin-bottom:1rem; filter: drop-shadow(0 0 30px rgba(52,200,80,0.5));">🎋</div>
       <div style="font-family:'Playfair Display',serif; font-size:2.2rem; font-weight:700;
            color:#e8dcc8; letter-spacing:-0.02em; margin-bottom:0.4rem;">
         Montecarlo Risk Model | Price Prediction
@@ -228,7 +228,7 @@ def render_auth_page():
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Sugar Pricing Forecasting",
-    page_icon="🍬",
+    page_icon="🎋",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -735,7 +735,7 @@ def main():
         st.markdown("""
         <div style="font-family:'Playfair Display',serif; font-size:1.3rem; font-weight:700;
              color:#ccfa34; margin-bottom:0.2rem; line-height:1.2;">
-          🍬 Sugar Price<br><span style="font-size:0.9rem;color:#ccfa34;font-family:'Space Mono',monospace;
+          🎋 Sugar Price<br><span style="font-size:0.9rem;color:#ccfa34;font-family:'Space Mono',monospace;
           font-style:normal;font-weight:400;letter-spacing:0.05em;">Montecarlo Risk Model | Price Prediction</span>
         </div>
         """, unsafe_allow_html=True)
@@ -1052,7 +1052,7 @@ def main():
 
     # ── Title ──────────────────────────────────────────────────────────────────────
     st.markdown('''
-    <div class="page-title">🍬 Sugar Pricing Forecasting </div>
+    <div class="page-title">🎋 Sugar Pricing Forecasting </div>
     <div class="page-subtitle">Montecarlo Risk Model | Price Prediction</div>
     ''', unsafe_allow_html=True)
     col_model, col_spot, col_horizon = st.columns(3)
