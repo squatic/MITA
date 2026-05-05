@@ -148,7 +148,7 @@ def render_auth_page():
       <div style="font-size:4rem; margin-bottom:1rem; filter: drop-shadow(0 0 30px rgba(52,200,80,0.5));">🎋</div>
       <div style="font-family:'Playfair Display',serif; font-size:2.2rem; font-weight:700;
            color:#e8dcc8; letter-spacing:-0.02em; margin-bottom:0.4rem;">
-        Montecarlo Risk Model | Price Prediction
+        Monte Carlo Risk Model | Sugar Price Prediction
       </div>
       <div style="font-family:'Space Mono',monospace; font-size:0.72rem; color:#3a6b45;
            letter-spacing:0.2em; text-transform:uppercase; margin-bottom:0.5rem;">
@@ -736,7 +736,7 @@ def main():
         <div style="font-family:'Playfair Display',serif; font-size:1.3rem; font-weight:700;
              color:#ccfa34; margin-bottom:0.2rem; line-height:1.2;">
           🎋 Sugar Price<br><span style="font-size:0.9rem;color:#ccfa34;font-family:'Space Mono',monospace;
-          font-style:normal;font-weight:400;letter-spacing:0.05em;">Montecarlo Risk Model | Price Prediction</span>
+          font-style:normal;font-weight:400;letter-spacing:0.05em;">Monte Carlo Risk Model | Price Prediction</span>
         </div>
         """, unsafe_allow_html=True)
         _user_email = _user.email if (_user is not None and hasattr(_user, "email")) else ""
@@ -1053,7 +1053,7 @@ def main():
     # ── Title ──────────────────────────────────────────────────────────────────────
     st.markdown('''
     <div class="page-title">🎋 Sugar Pricing Forecasting </div>
-    <div class="page-subtitle">Montecarlo Risk Model | Price Prediction</div>
+    <div class="page-subtitle">Monte Carlo Risk Model | Price Prediction</div>
     ''', unsafe_allow_html=True)
     col_model, col_spot, col_horizon = st.columns(3)
     with col_model:
