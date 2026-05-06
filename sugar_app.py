@@ -145,10 +145,10 @@ def render_auth_page():
       display: flex; flex-direction: column; align-items: center; justify-content: center;
       padding: 3rem 1rem 2rem; text-align: center;
     ">
-      <div style="font-size:4rem; margin-bottom:1rem; filter: drop-shadow(0 0 30px rgba(52,200,80,0.5));">🎋</div>
+      <div style="font-size:4rem; margin-bottom:1rem; filter: drop-shadow(0 0 30px rgba(52,200,80,0.5));">🍬</div>
       <div style="font-family:'Playfair Display',serif; font-size:2.2rem; font-weight:700;
            color:#e8dcc8; letter-spacing:-0.02em; margin-bottom:0.4rem;">
-        Monte Carlo Risk Model | Sugar Price Prediction
+        Montecarlo Risk Model | Price Prediction
       </div>
       <div style="font-family:'Space Mono',monospace; font-size:0.72rem; color:#3a6b45;
            letter-spacing:0.2em; text-transform:uppercase; margin-bottom:0.5rem;">
@@ -228,7 +228,7 @@ def render_auth_page():
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Sugar Pricing Forecasting",
-    page_icon="🎋",
+    page_icon="🍬",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -735,8 +735,8 @@ def main():
         st.markdown("""
         <div style="font-family:'Playfair Display',serif; font-size:1.3rem; font-weight:700;
              color:#ccfa34; margin-bottom:0.2rem; line-height:1.2;">
-          🎋 Sugar Price<br><span style="font-size:0.9rem;color:#ccfa34;font-family:'Space Mono',monospace;
-          font-style:normal;font-weight:400;letter-spacing:0.05em;">Monte Carlo Risk Model | Price Prediction</span>
+          🍬 Sugar Price<br><span style="font-size:0.9rem;color:#ccfa34;font-family:'Space Mono',monospace;
+          font-style:normal;font-weight:400;letter-spacing:0.05em;">Montecarlo Risk Model | Price Prediction</span>
         </div>
         """, unsafe_allow_html=True)
         _user_email = _user.email if (_user is not None and hasattr(_user, "email")) else ""
@@ -1052,8 +1052,8 @@ def main():
 
     # ── Title ──────────────────────────────────────────────────────────────────────
     st.markdown('''
-    <div class="page-title">🎋 Sugar Pricing Forecasting </div>
-    <div class="page-subtitle">Monte Carlo Risk Model | Price Prediction</div>
+    <div class="page-title">🍬 Sugar Pricing Forecasting </div>
+    <div class="page-subtitle">Montecarlo Risk Model | Price Prediction</div>
     ''', unsafe_allow_html=True)
     col_model, col_spot, col_horizon = st.columns(3)
     with col_model:
@@ -1888,6 +1888,361 @@ def main():
                         })
                         st.dataframe(pct_tbl, use_container_width=True, hide_index=True)  # BUG FIX 4
 
+
+    # ── SugarBot Floating Chatbot ──────────────────────────────────────────────────
+    import streamlit.components.v1 as components
+    components.html(r"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Playfair+Display:wght@400;600&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #0e0d0b; --surface: #181612; --surface2: #211f1a; --surface3: #2a271f;
+  --border: rgba(255,220,100,0.1); --border2: rgba(255,220,100,0.2);
+  --gold: #e8c547; --gold-dim: #a88c2e; --gold-soft: rgba(232,197,71,0.08);
+  --gold-glow: rgba(232,197,71,0.15); --text: #f0e9d6; --text-muted: #8a8070;
+  --text-dim: #5a5448; --green: #4caf7d; --green-bg: rgba(76,175,125,0.1);
+  --user-bubble: #1e2a1a; --user-border: rgba(76,175,125,0.25);
+  --bot-bubble: #1c1a14; --bot-border: rgba(232,197,71,0.15);
+}
+body { font-family: 'DM Mono', monospace; background: transparent; overflow: hidden; }
+
+/* FAB toggle button */
+#fab {
+  position: fixed; bottom: 24px; right: 24px;
+  width: 54px; height: 54px; border-radius: 50%;
+  background: var(--gold); border: none; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 24px; z-index: 9999;
+  box-shadow: 0 4px 20px rgba(232,197,71,0.45);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+#fab:hover { transform: scale(1.08); box-shadow: 0 6px 28px rgba(232,197,71,0.6); }
+
+/* Chat window */
+#chat-window {
+  position: fixed; bottom: 90px; right: 24px;
+  width: 370px; height: 540px;
+  background: var(--bg);
+  border: 1px solid var(--border2);
+  border-radius: 18px;
+  display: none; flex-direction: column;
+  overflow: hidden; z-index: 9998;
+  box-shadow: 0 16px 60px rgba(0,0,0,0.7), 0 0 0 1px rgba(232,197,71,0.06);
+  animation: slideUp 0.25s ease;
+}
+#chat-window.open { display: flex; }
+@keyframes slideUp { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:translateY(0); } }
+
+/* Header */
+.chat-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 13px 16px; background: var(--surface);
+  border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.chat-logo {
+  width: 34px; height: 34px; background: var(--gold);
+  border-radius: 9px; display: flex; align-items: center;
+  justify-content: center; font-size: 17px; flex-shrink: 0;
+  box-shadow: 0 0 14px rgba(232,197,71,0.3);
+}
+.chat-title { font-family: 'Playfair Display', serif; font-size: 14px; color: var(--gold); }
+.chat-sub { font-size: 9px; color: var(--text-muted); letter-spacing: 0.07em; text-transform: uppercase; margin-top: 1px; }
+.status-dot { width: 7px; height: 7px; background: var(--green); border-radius: 50%; box-shadow: 0 0 6px var(--green); animation: pulse 2s infinite; margin-left: auto; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+.close-btn { background: none; border: none; color: var(--text-muted); font-size: 18px; cursor: pointer; padding: 2px 4px; border-radius: 5px; line-height: 1; margin-left: 6px; }
+.close-btn:hover { color: var(--text); background: var(--surface2); }
+
+/* Chips */
+.chips-bar {
+  display: flex; gap: 6px; padding: 9px 12px;
+  overflow-x: auto; scrollbar-width: none; flex-shrink: 0;
+  border-bottom: 1px solid var(--border); background: var(--surface);
+}
+.chips-bar::-webkit-scrollbar { display: none; }
+.chip {
+  white-space: nowrap; font-family: 'DM Mono', monospace; font-size: 9px;
+  letter-spacing: 0.04em; padding: 4px 10px;
+  border: 1px solid var(--border2); border-radius: 100px;
+  color: var(--gold); background: var(--gold-soft);
+  cursor: pointer; transition: all 0.2s; flex-shrink: 0;
+}
+.chip:hover { background: var(--gold-glow); border-color: var(--gold); }
+
+/* Messages */
+.messages {
+  flex: 1; overflow-y: auto; padding: 14px;
+  display: flex; flex-direction: column; gap: 10px;
+  scrollbar-width: thin; scrollbar-color: var(--surface3) transparent;
+}
+.messages::-webkit-scrollbar { width: 3px; }
+.messages::-webkit-scrollbar-thumb { background: var(--surface3); border-radius: 2px; }
+
+.msg { display: flex; gap: 8px; animation: fadeUp 0.25s ease; }
+@keyframes fadeUp { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+.msg.user { flex-direction: row-reverse; }
+
+.avatar {
+  width: 26px; height: 26px; border-radius: 7px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; flex-shrink: 0; margin-top: 2px;
+}
+.avatar.bot { background: var(--gold-soft); border: 1px solid var(--border2); }
+.avatar.user { background: var(--green-bg); border: 1px solid var(--user-border); }
+
+.bubble {
+  max-width: calc(100% - 70px); padding: 9px 12px;
+  border-radius: 11px; font-size: 12px; line-height: 1.65; white-space: pre-wrap;
+}
+.msg.bot .bubble { background: var(--bot-bubble); border: 1px solid var(--bot-border); border-bottom-left-radius: 3px; color: var(--text); }
+.msg.user .bubble { background: var(--user-bubble); border: 1px solid var(--user-border); border-bottom-right-radius: 3px; color: var(--text); }
+.bubble strong { color: var(--gold); font-weight: 500; }
+.bubble em { color: var(--text-muted); font-style: italic; }
+.bubble code { font-family: 'DM Mono',monospace; font-size: 10px; background: rgba(232,197,71,0.08); border: 1px solid var(--border); padding: 1px 4px; border-radius: 3px; color: var(--gold); }
+
+.typing-indicator { display: flex; gap: 4px; align-items: center; padding: 3px 0; }
+.typing-indicator span { width: 5px; height: 5px; background: var(--gold-dim); border-radius: 50%; animation: bounce 1.2s infinite; }
+.typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+.typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes bounce { 0%,60%,100%{ transform:translateY(0); } 30%{ transform:translateY(-5px); } }
+
+/* Input */
+.input-area {
+  padding: 10px 12px; border-top: 1px solid var(--border);
+  background: var(--surface); display: flex; gap: 8px;
+  align-items: flex-end; flex-shrink: 0;
+}
+.input-wrap {
+  flex: 1; background: var(--surface2); border: 1px solid var(--border2);
+  border-radius: 9px; display: flex; align-items: flex-end;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.input-wrap:focus-within { border-color: var(--gold); box-shadow: 0 0 0 2px rgba(232,197,71,0.08); }
+textarea {
+  flex: 1; background: transparent; border: none; outline: none;
+  color: var(--text); font-family: 'DM Mono',monospace; font-size: 12px;
+  padding: 9px 12px; resize: none; max-height: 100px; min-height: 38px; line-height: 1.5;
+}
+textarea::placeholder { color: var(--text-dim); }
+.send-btn {
+  width: 34px; height: 34px; border-radius: 7px; background: var(--gold);
+  border: none; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; transition: background 0.2s, transform 0.15s;
+  box-shadow: 0 0 10px rgba(232,197,71,0.2);
+}
+.send-btn:hover { background: #f0d050; box-shadow: 0 0 16px rgba(232,197,71,0.35); }
+.send-btn:active { transform: scale(0.94); }
+.send-btn:disabled { background: var(--surface3); box-shadow: none; cursor: default; }
+.send-btn svg { width: 14px; height: 14px; fill: #0e0d0b; }
+.footer-note { text-align: center; font-size: 8px; color: var(--text-dim); padding: 4px 0 3px; letter-spacing: 0.06em; text-transform: uppercase; flex-shrink: 0; }
+</style>
+</head>
+<body>
+
+<button id="fab" onclick="toggleChat()" title="Ask SugarBot">🍬</button>
+
+<div id="chat-window">
+  <div class="chat-header">
+    <div class="chat-logo">🍬</div>
+    <div>
+      <div class="chat-title">SugarBot</div>
+      <div class="chat-sub">Monte Carlo Assistant</div>
+    </div>
+    <div class="status-dot"></div>
+    <button class="close-btn" onclick="toggleChat()">✕</button>
+  </div>
+
+  <div class="chips-bar">
+    <div class="chip" onclick="sendChip('What does this app do?')">What does this app do?</div>
+    <div class="chip" onclick="sendChip('How do I predict sugar prices?')">How to predict prices?</div>
+    <div class="chip" onclick="sendChip('What inputs do I need to enter?')">What inputs do I need?</div>
+    <div class="chip" onclick="sendChip('How does Monte Carlo simulation work?')">How does Monte Carlo work?</div>
+    <div class="chip" onclick="sendChip('How do I read the simulation results?')">Reading results</div>
+    <div class="chip" onclick="sendChip('What are the risk metrics shown?')">Risk metrics</div>
+    <div class="chip" onclick="sendChip('What trading decisions can I make from the results?')">Trading decisions</div>
+  </div>
+
+  <div class="messages" id="messages">
+    <div class="msg bot">
+      <div class="avatar bot">🍬</div>
+      <div class="bubble">👋 Hello! I'm <strong>SugarBot</strong>, your guide to this <strong>Monte Carlo Sugar Price Prediction</strong> app.
+
+I can help you:
+• Understand what the app does
+• Walk you through entering inputs
+• Explain simulation results &amp; charts
+• Help interpret risk metrics &amp; trading signals
+
+Tap a quick button above or ask me anything!</div>
+    </div>
+  </div>
+
+  <div class="input-area">
+    <div class="input-wrap">
+      <textarea id="userInput" placeholder="Ask about the Sugar app…" rows="1"
+        onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+    </div>
+    <button class="send-btn" id="sendBtn" onclick="sendMessage()">
+      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+    </button>
+  </div>
+  <div class="footer-note">Powered by Claude AI</div>
+</div>
+
+<script>
+const SYSTEM_PROMPT = `You are SugarBot, a friendly and knowledgeable assistant embedded inside the Monte Carlo Sugar Price Prediction app — a Streamlit app for Philippine mill-gate raw sugar price forecasting.
+
+Your sole purpose is to help users understand and use this app effectively. The app uses Monte Carlo simulation (GBM and Mean-Reverting/Ornstein-Uhlenbeck models) to predict sugar prices in ₱/Lkg (Philippine Pesos per Lkg) and assist traders in making informed buy/sell decisions.
+
+APP OVERVIEW:
+- Built with Streamlit + Python. Uses GBM (Geometric Brownian Motion) and Mean-Reverting (Ornstein-Uhlenbeck) stochastic models.
+- Requires Supabase credentials for user login and saving simulation runs.
+- Prices are in Philippine Pesos per Lkg (Lkg = Liston-kilogram, a standard sugar unit in the Philippines).
+
+APP TABS:
+1. MONTE CARLO SIMULATION — Main tab. Enter spot price, model type, parameters (μ/σ for GBM or κ/θ/σ for OU), horizon, break-even price, number of simulations, and seed. Then click Run to get results.
+2. PARAMETER ESTIMATOR — Upload a CSV/Excel of historical sugar prices, choose data frequency, and the app automatically estimates GBM and OU parameters you can apply directly.
+3. WEEKLY FORECAST — Shows a week-by-week price forecast chart and detailed table with P05/P25/median/mean/P75/P95 percentiles.
+4. SAVED RUNS — View past simulation runs saved to Supabase, showing key metrics per run.
+
+KEY INPUTS:
+- Spot Price (₱/Lkg): Current market price of sugar
+- Model: GBM (trending markets) or Mean-Reverting (range-bound markets)
+- μ (mu): Annual drift/return for GBM
+- σ (sigma): Annual volatility
+- κ (kappa): Mean-reversion speed for OU model
+- θ (theta): Long-run mean price for OU model
+- Break-even price: Your cost price — used to calculate loss probability
+- Horizon: 1 month, 3 months, 6 months, 1 year
+- N simulations: Number of Monte Carlo paths (500–10,000)
+- Seed: For reproducible results
+
+SIMULATION RESULTS:
+- Histogram of terminal prices with percentile bands (P05, P25, P50, P75, P95)
+- Key metrics: Mean price, Median price, VaR 95%, ES95 (CVaR), Probability of being ≤ break-even
+- Spaghetti chart: Sample price paths over time
+- Trading signal: BUY / HOLD / SELL based on median vs spot and loss probability
+
+RISK METRICS:
+- VaR 95%: The price at the 5th percentile — 95% of simulations end above this
+- ES95 (CVaR): Average price in the worst 5% of scenarios
+- P(≤ Break-even): Probability of ending at or below your cost price
+- P10/P50/P90: Bearish / Median / Bullish price outcomes
+
+TONE & BEHAVIOR:
+- Be concise, warm, and practical. Use simple language.
+- Always relate answers back to the Philippine sugar trading context.
+- If asked something unrelated, gently redirect.
+- Use light formatting: bold for key terms, bullet points for steps.
+- Never make up specific numbers — describe generically if uncertain.`;
+
+let history = [];
+let isLoading = false;
+let isOpen = false;
+
+function toggleChat() {
+  isOpen = !isOpen;
+  const win = document.getElementById('chat-window');
+  const fab = document.getElementById('fab');
+  if (isOpen) {
+    win.classList.add('open');
+    fab.textContent = '✕';
+    setTimeout(() => document.getElementById('userInput').focus(), 300);
+  } else {
+    win.classList.remove('open');
+    fab.textContent = '🍬';
+  }
+}
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 100) + 'px';
+}
+
+function handleKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+}
+
+function sendChip(text) {
+  if (!isOpen) toggleChat();
+  document.getElementById('userInput').value = text;
+  sendMessage();
+}
+
+function addMessage(role, text) {
+  const container = document.getElementById('messages');
+  const div = document.createElement('div');
+  div.className = `msg ${role}`;
+  const isBot = role === 'bot';
+  div.innerHTML = `<div class="avatar ${role}">${isBot ? '🍬' : '👤'}</div><div class="bubble">${formatText(text)}</div>`;
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+}
+
+function formatText(t) {
+  return t
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>')
+    .replace(/`(.*?)`/g,'<code>$1</code>')
+    .replace(/\*(.*?)\*/g,'<em>$1</em>');
+}
+
+function showTyping() {
+  const c = document.getElementById('messages');
+  const d = document.createElement('div');
+  d.className = 'msg bot'; d.id = 'typing';
+  d.innerHTML = `<div class="avatar bot">🍬</div><div class="bubble"><div class="typing-indicator"><span></span><span></span><span></span></div></div>`;
+  c.appendChild(d);
+  c.scrollTop = c.scrollHeight;
+}
+
+function removeTyping() {
+  const el = document.getElementById('typing');
+  if (el) el.remove();
+}
+
+async function sendMessage() {
+  if (isLoading) return;
+  const input = document.getElementById('userInput');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = ''; input.style.height = 'auto';
+  isLoading = true;
+  document.getElementById('sendBtn').disabled = true;
+  addMessage('user', text);
+  history.push({ role: 'user', content: text });
+  showTyping();
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        system: SYSTEM_PROMPT,
+        messages: history
+      })
+    });
+    const data = await res.json();
+    removeTyping();
+    const reply = data?.content?.[0]?.text || 'Sorry, I could not get a response. Please try again.';
+    history.push({ role: 'assistant', content: reply });
+    addMessage('bot', reply);
+  } catch (err) {
+    removeTyping();
+    addMessage('bot', '⚠️ Connection error. Please check your internet and try again.');
+  }
+  isLoading = false;
+  document.getElementById('sendBtn').disabled = false;
+  document.getElementById('userInput').focus();
+}
+</script>
+</body>
+</html>
+""", height=0, scrolling=False)
 
     # ── Footer ─────────────────────────────────────────────────────────────────────
     st.markdown("---")
