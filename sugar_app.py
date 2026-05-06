@@ -2242,7 +2242,7 @@ async function sendMessage() {
 </script>
 </body>
 </html>
-""", height=0, scrolling=False)
+""", height=620, scrolling=False)
 
     # ── Footer ─────────────────────────────────────────────────────────────────────
     st.markdown("---")
