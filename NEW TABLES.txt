@@ -1,0 +1,49 @@
+CREATE TABLE price_history (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id),
+    date DATE,
+    price NUMERIC,
+    source TEXT,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE market_alerts (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id),
+    alert_price NUMERIC,
+    condition TEXT, -- 'above' or 'below'
+    message TEXT,
+    triggered BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE forecast_notes (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id),
+    simulation_id INTEGER REFERENCES simulation_runs(id),
+    note TEXT,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE volume_records (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id),
+    record_date DATE,
+    volume_lkg NUMERIC,
+    actual_price NUMERIC,
+    revenue NUMERIC,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE model_presets (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id),
+    preset_name TEXT,
+    model_type TEXT,
+    mu NUMERIC,
+    sigma NUMERIC,
+    kappa NUMERIC,
+    theta NUMERIC,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
