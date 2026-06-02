@@ -8,3 +8,4 @@ matplotlib
 anthropic
 streamlit-cookies-controller
 cryptography
+psycopg2-binary
